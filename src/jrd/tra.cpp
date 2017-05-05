@@ -65,6 +65,7 @@
 #include "../common/classes/ClumpletWriter.h"
 #include "../common/classes/TriState.h"
 #include "../common/utils_proto.h"
+#include "../common/os/os_utils.h"
 #include "../lock/lock_proto.h"
 #include "../dsql/dsql.h"
 #include "../dsql/dsql_proto.h"
@@ -1259,8 +1260,13 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 	}
 
 	++transaction->tra_use_count;
+
 	if (transaction->tra_lock)
 		LCK_release(tdbb, transaction->tra_lock);
+
+	if (transaction->tra_snapshot_ipc_lock)
+		LCK_release(tdbb, transaction->tra_snapshot_ipc_lock);
+
 	--transaction->tra_use_count;
 
 	// release the sparse bit map used for commit retain transaction
@@ -3007,6 +3013,45 @@ static void transaction_options(thread_db* tdbb,
 			}
 			break;
 
+		case isc_tpb_sharing_snapshot:
+			{
+				const USHORT len = *tpb++;
+
+				// Does the encoded number's length surpasses the remaining of the TPB?
+				if (tpb >= end)
+				{
+					ERR_post(Arg::Gds(isc_bad_tpb_content) <<
+							 Arg::Gds(isc_tpb_missing_value) << Arg::Num(len) <<
+																Arg::Str("isc_tpb_sharing_snapshot"));
+				}
+
+				if (end - tpb < len)
+				{
+					ERR_post(Arg::Gds(isc_bad_tpb_content) <<
+							 Arg::Gds(isc_tpb_corrupt_len) << Arg::Num(len) <<
+															  Arg::Str("isc_tpb_sharing_snapshot"));
+				}
+
+				if (!len)
+				{
+					ERR_post(Arg::Gds(isc_bad_tpb_content) <<
+							 Arg::Gds(isc_tpb_null_len) << Arg::Str("isc_tpb_sharing_snapshot"));
+				}
+
+				if (len > sizeof(ULONG))
+				{
+					ERR_post(Arg::Gds(isc_bad_tpb_content) <<
+							 Arg::Gds(isc_tpb_overflow_len) << Arg::Num(len) << Arg::Str("isc_tpb_sharing_snapshot"));
+				}
+
+				const SLONG value = gds__vax_integer(tpb, len);
+
+				transaction->tra_base_tra_number = (TraNumber) value;
+
+				tpb += len;
+			}
+			break;
+
 		default:
 			ERR_post(Arg::Gds(isc_bad_tpb_form));
 		}
@@ -3062,6 +3107,65 @@ static void transaction_options(thread_db* tdbb,
 }
 
 
+struct TraSnapshot
+{
+	TraNumber number;
+	TraNumber oldest;
+	TraNumber oldest_active;
+	TraNumber oldest_snapshot;
+	ULONG count;
+};
+
+
+static int blocking_ast_snapshot(void* ast_object)
+{
+	printf("blocking_ast_snapshot\n");	//// FIXME:
+
+	jrd_tra* const transaction = static_cast<jrd_tra*>(ast_object);
+
+	try
+	{
+		Database* const dbb = transaction->tra_attachment->att_database;
+
+		AsyncContextHolder tdbb(dbb, FB_FUNCTION, transaction->tra_snapshot_ipc_lock);
+
+		string filename;
+		filename.printf("/tmp/firebird/fb_transaction_%d", transaction->tra_number);
+		printf("--> filename: %s\n", filename.c_str());
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
+
+		int fd = os_utils::open(filename.c_str(), O_CREAT | O_WRONLY | O_TRUNC | O_BINARY);
+
+		if (fd >= 0)
+		{
+			TraSnapshot snapshot;
+			snapshot.number = transaction->tra_number;
+			snapshot.oldest = transaction->tra_oldest;
+			snapshot.oldest_active = transaction->tra_oldest_active;
+			snapshot.oldest_snapshot = transaction->tra_oldest_snapshot;
+			snapshot.count = (ULONG) transaction->tra_transactions.getCount();
+
+			write(fd, &snapshot, sizeof(snapshot));
+			write(fd, transaction->tra_transactions.begin(), snapshot.count);
+			close(fd);
+		}
+
+		LCK_convert(tdbb, transaction->tra_snapshot_ipc_lock, LCK_read, LCK_WAIT);
+		Thread::sleep(800);
+		LCK_convert(tdbb, transaction->tra_snapshot_ipc_lock, LCK_write, LCK_WAIT);
+	}
+	catch (const Firebird::Exception&)
+	{
+		// no-op
+	}
+
+	return 0;
+}
+
+
 static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 {
 /**************************************
@@ -3085,19 +3189,18 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// the transaction inventory page was initialized to zero, it
 	// transaction is automatically marked active.
 
-	TraNumber oldest, number, active, oldest_active, oldest_snapshot;
+	TraNumber oldest, number, base_number, active, oldest_active, oldest_snapshot;
 
 #ifdef SUPERSERVER_V2
-	number = bump_transaction_id(tdbb, &window);
+	number = base_number = bump_transaction_id(tdbb, &window);
 	oldest = dbb->dbb_oldest_transaction;
-	active = MAX(dbb->dbb_oldest_active, dbb->dbb_oldest_transaction);
 	oldest_active = dbb->dbb_oldest_active;
 	oldest_snapshot = dbb->dbb_oldest_snapshot;
 
 #else // SUPERSERVER_V2
 	if (dbb->readOnly())
 	{
-		number = dbb->dbb_next_transaction + dbb->generateTransactionId(tdbb);
+		number = base_number = dbb->dbb_next_transaction + dbb->generateTransactionId(tdbb);
 		oldest = dbb->dbb_oldest_transaction;
 		oldest_active = dbb->dbb_oldest_active;
 		oldest_snapshot = dbb->dbb_oldest_snapshot;
@@ -3108,17 +3211,56 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 			(trans->tra_flags & TRA_readonly);
 
 		const header_page* header = bump_transaction_id(tdbb, &window, dontWrite);
-		number = Ods::getNT(header);
+		number = base_number = Ods::getNT(header);
 		oldest = Ods::getOIT(header);
 		oldest_active = Ods::getOAT(header);
 		oldest_snapshot = Ods::getOST(header);
+	}
+#endif // SUPERSERVER_V2
+
+	if (trans->tra_base_tra_number.specified)
+	{
+		//// TODO: Validate if base transaction is active and uses SNAPSHOT isolation level.
+
+		Lock* lock = FB_NEW_RPT(*tdbb->getDefaultPool(), 0) Lock(tdbb, sizeof(ULONG), LCK_snapshot_tra);
+		lock->setKey(trans->tra_base_tra_number.value);
+
+		bool locked = LCK_lock(tdbb, lock, LCK_read, LCK_WAIT);
+		printf("lock: %d\n", locked);
+
+		if (locked)
+		{
+			string filename;
+			filename.printf("/tmp/firebird/fb_transaction_%d", trans->tra_base_tra_number.value);
+			printf("--> filename: %s\n", filename.c_str());
+
+			int fd = os_utils::open(filename.c_str(), O_RDONLY | O_BINARY);
+
+			if (fd >= 0)
+			{
+				TraSnapshot snapshot;
+				read(fd, &snapshot, sizeof(snapshot));
+
+				base_number = snapshot.number;
+				oldest = snapshot.oldest;
+				oldest_active = snapshot.oldest_active;
+				oldest_snapshot = snapshot.oldest_snapshot;
+				trans->tra_transactions.resize(snapshot.count);
+
+				read(fd, trans->tra_transactions.begin(), snapshot.count);
+
+				close(fd);
+			}
+
+			LCK_release(tdbb, lock);
+		}
+		else
+			delete lock;
 	}
 
 	// oldest (OIT) > oldest_active (OAT) if OIT was advanced by sweep
 	// and no transactions was started after the sweep starts
 	active = MAX(oldest_active, oldest);
-
-#endif // SUPERSERVER_V2
 
 	// Allocate pool and transactions block.  Since, by policy,
 	// all transactions older than the oldest are either committed
@@ -3128,7 +3270,16 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 
 	TraNumber base = oldest & ~TRA_MASK;
 	const TraNumber top = (dbb->dbb_flags & DBB_read_only) ?
-		dbb->dbb_next_transaction : number;
+		dbb->dbb_next_transaction : base_number;
+
+	//// FIXME:
+	printf("--> number: %d, oldest: %d, oldest_active: %d, oldest_snapshot: %d, base: %d, top: %d\n",
+		(int) number,
+		(int) oldest,
+		(int) oldest_active,
+		(int) oldest_snapshot,
+		(int) base,
+		(int) top);
 
 	if (!(trans->tra_flags & TRA_read_committed) && (top >= oldest))
 	{
@@ -3140,6 +3291,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	trans->tra_top = top;
 	trans->tra_oldest = oldest;
 	trans->tra_oldest_active = active;
+	trans->tra_oldest_snapshot = oldest_snapshot;
 
 	trans->tra_lock = lock;
 	lock->setKey(number);
@@ -3162,6 +3314,13 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 #endif
 		ERR_post(Arg::Gds(isc_lock_conflict));
 	}
+
+	trans->tra_snapshot_ipc_lock = FB_NEW_RPT(*tdbb->getDefaultPool(), 0)
+		Lock(tdbb, sizeof(ULONG), LCK_snapshot_tra, trans, blocking_ast_snapshot);
+	trans->tra_snapshot_ipc_lock->setKey(number);
+
+	if (!LCK_lock(tdbb, trans->tra_snapshot_ipc_lock, LCK_write, LCK_WAIT))
+		ERR_post(Arg::Gds(isc_lock_conflict));
 
 	// Link the transaction to the attachment block before releasing
 	// header page for handling signals.
@@ -3187,7 +3346,10 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	if (trans->tra_flags & TRA_read_committed)
 		TPC_initialize_tpc(tdbb, top);
 	else if (top > base)
-		TRA_get_inventory(tdbb, trans->tra_transactions.begin(), base, top);
+	{
+		if (!trans->tra_base_tra_number.specified)
+			TRA_get_inventory(tdbb, trans->tra_transactions.begin(), base, top);
+	}
 
 	// Next task is to find the oldest active transaction on the system.  This
 	// is needed for garbage collection.  Things are made ever so slightly
@@ -3196,10 +3358,10 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 
 	Lock temp_lock(tdbb, sizeof(TraNumber), LCK_tra, trans);
 
-	trans->tra_oldest_active = number;
+	trans->tra_oldest_active = base_number;
 	base = oldest & ~TRA_MASK;
-	oldest_active = number;
-	bool cleanup = !(number % TRA_ACTIVE_CLEANUP);
+	oldest_active = base_number;
+	bool cleanup = !(base_number % TRA_ACTIVE_CLEANUP);
 	int oldest_state;
 
 	for (; active < top; active++)
@@ -3210,7 +3372,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 			active = TPC_find_states(tdbb, active, top, mask, oldest_state);
 			if (!active)
 			{
-				active = number;
+				active = base_number;
 				break;
 			}
 			fb_assert(oldest_state == tra_active);
@@ -3268,9 +3430,9 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// are used to determine garbage collection threshold for attachment-local
 	// data such as temporary tables (GTT's).
 
-	trans->tra_att_oldest_active = number;
-	TraNumber att_oldest_active = number;
-	TraNumber att_oldest_snapshot = number;
+	trans->tra_att_oldest_active = base_number;
+	TraNumber att_oldest_active = base_number;
+	TraNumber att_oldest_snapshot = base_number;
 
 	for (jrd_tra* tx_att = attachment->att_transactions; tx_att; tx_att = tx_att->tra_next)
 	{
@@ -3278,7 +3440,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 		att_oldest_snapshot = MIN(att_oldest_snapshot, tx_att->tra_att_oldest_active);
 	}
 
-	trans->tra_att_oldest_active = (trans->tra_flags & TRA_read_committed) ? number : att_oldest_active;
+	trans->tra_att_oldest_active = (trans->tra_flags & TRA_read_committed) ? base_number : att_oldest_active;
 
 	if (attachment->att_oldest_snapshot < att_oldest_snapshot)
 		attachment->att_oldest_snapshot = att_oldest_snapshot;
@@ -3289,7 +3451,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// unnecessary blocking of garbage collection by read-committed
 	// transactions
 
-	const TraNumber lck_data = (trans->tra_flags & TRA_read_committed) ? number : oldest_active;
+	const TraNumber lck_data = (trans->tra_flags & TRA_read_committed) ? base_number : oldest_active;
 
 	//fb_assert(sizeof(lock->lck_data) == sizeof(lck_data));
 	if (lock->lck_data != (SLONG) lck_data)
@@ -3326,7 +3488,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	}
 
 	if (oldest >= top && dbb->dbb_flags & DBB_read_only)
-		oldest = number;
+		oldest = base_number;
 
 	if (--oldest > dbb->dbb_oldest_transaction)
 		dbb->dbb_oldest_transaction = oldest;

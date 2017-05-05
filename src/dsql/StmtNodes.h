@@ -1550,6 +1550,7 @@ public:
 	Nullable<bool> restartRequests;
 	Nullable<bool> autoCommit;
 	Nullable<USHORT> lockTimeout;
+	Nullable<TraNumber> baseTraNumber;
 	Firebird::Array<RestrictionOption*> reserveList;
 	Firebird::UCharBuffer tpb;
 };

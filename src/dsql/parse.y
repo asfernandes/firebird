@@ -618,6 +618,7 @@ using namespace Firebird;
 %token <metaNamePtr> RDB_SYSTEM_PRIVILEGE
 %token <metaNamePtr> SECURITY
 %token <metaNamePtr> SESSION
+%token <metaNamePtr> SHARING
 %token <metaNamePtr> SQL
 %token <metaNamePtr> SYSTEM
 %token <metaNamePtr> TIES
@@ -5182,6 +5183,9 @@ tran_option($setTransactionNode)
 	| RESERVING
 		{ checkDuplicateClause($setTransactionNode->reserveList, "RESERVING"); }
 		restr_list($setTransactionNode)
+	// sharing snapshot
+	| SHARING SNAPSHOT FROM long_integer
+		{ setClause($setTransactionNode->baseTraNumber, "SHARING SNAPSHOT FROM", (TraNumber) $4); }
 	;
 
 %type <uintVal>	isolation_mode
@@ -8408,6 +8412,7 @@ non_reserved_word
 	| RANGE
 	| SECURITY
 	| SESSION
+	| SHARING
 	| SQL
 	| SYSTEM
 	| TIES

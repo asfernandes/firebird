@@ -406,6 +406,7 @@ static const TOK tokens[] =
 	{TOK_SET, "SET", false},
 	{TOK_SHADOW, "SHADOW", true},
 	{TOK_SHARED, "SHARED", true},
+	{TOK_SHARING, "SHARING", true},
 	{TOK_SIGN, "SIGN", true},
 	{TOK_SIMILAR, "SIMILAR", false},
 	{TOK_SIN, "SIN", true},

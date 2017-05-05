@@ -251,6 +251,7 @@ public:
 	TraNumber tra_oldest;				// oldest interesting transaction
 	TraNumber tra_oldest_active;		// record versions older than this can be
 										// gargage-collected by this tx
+	TraNumber tra_oldest_snapshot;
 	TraNumber tra_att_oldest_active;	// oldest active transaction in the same attachment
 	jrd_tra*	tra_next;				// next transaction in attachment
 	MemoryPool* const tra_pool;			// pool for transaction
@@ -259,12 +260,14 @@ public:
 	BlobIndexTree* tra_blobs;			// pointer to actual list of active blobs
 	ArrayField*	tra_arrays;				// Linked list of active arrays
 	Lock*		tra_lock;				// lock for transaction
+	Lock*		tra_snapshot_ipc_lock;	// lock for transaction snapshot IPC
 	vec<Lock*>*			tra_relation_locks;	// locks for relations
 	TransactionBitmap*	tra_commit_sub_trans;	// committed sub-transactions
 	Savepoint*	tra_save_point;			// list of savepoints
 	Savepoint*	tra_save_free;			// free savepoints
 	SavNumber tra_save_point_number;	// next save point number to use
 	ULONG tra_flags;
+	Nullable<TraNumber> tra_base_tra_number;	// base transaction number
 	DeferredJob*	tra_deferred_job;	// work deferred to commit time
 	ResourceList tra_resources;			// resource existence list
 	Firebird::StringMap tra_context_vars; // Context variables for the transaction

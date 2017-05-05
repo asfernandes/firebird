@@ -7906,6 +7906,13 @@ SetTransactionNode* SetTransactionNode::dsqlPass(DsqlCompilerScratch* dsqlScratc
 		dsqlScratch->appendUShort(lockTimeout.value);
 	}
 
+	if (baseTraNumber.specified)
+	{
+		dsqlScratch->appendUChar(isc_tpb_sharing_snapshot);
+		dsqlScratch->appendUChar(4);
+		dsqlScratch->appendULong(baseTraNumber.value);
+	}
+
 	for (RestrictionOption** i = reserveList.begin(); i != reserveList.end(); ++i)
 		genTableLock(dsqlScratch, **i, lockLevel);
 
