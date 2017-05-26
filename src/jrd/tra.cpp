@@ -3183,6 +3183,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	Jrd::Attachment* const attachment = tdbb->getAttachment();
 	WIN window(DB_PAGE_SPACE, -1);
 
+	bool fromBase = !dbb->readOnly() && trans->tra_base_tra_number.specified;
 	Lock* lock = FB_NEW_RPT(*tdbb->getDefaultPool(), 0) Lock(tdbb, sizeof(TraNumber), LCK_tra);
 
 	// Read header page and allocate transaction number.  Since
@@ -3220,8 +3221,12 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 
 	if (trans->tra_base_tra_number.specified)
 	{
+		//// TODO: Validate if this transaction uses SNAPSHOT isolation level.
 		//// TODO: Validate if base transaction is active and uses SNAPSHOT isolation level.
+	}
 
+	if (fromBase)
+	{
 		Lock* lock = FB_NEW_RPT(*tdbb->getDefaultPool(), 0) Lock(tdbb, sizeof(ULONG), LCK_snapshot_tra);
 		lock->setKey(trans->tra_base_tra_number.value);
 
@@ -3269,8 +3274,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// of four, which puts the transaction on a byte boundary.
 
 	TraNumber base = oldest & ~TRA_MASK;
-	const TraNumber top = (dbb->dbb_flags & DBB_read_only) ?
-		dbb->dbb_next_transaction : base_number;
+	const TraNumber top = dbb->readOnly() ? dbb->dbb_next_transaction : base_number;
 
 	//// FIXME:
 	printf("--> number: %d, oldest: %d, oldest_active: %d, oldest_snapshot: %d, base: %d, top: %d\n",
@@ -3281,7 +3285,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 		(int) base,
 		(int) top);
 
-	if (!(trans->tra_flags & TRA_read_committed) && (top >= oldest))
+	if (!(trans->tra_flags & TRA_read_committed) && (top >= oldest) && !fromBase)
 	{
 		const FB_SIZE_T length = (top + 1 - base + TRA_MASK) / 4;
 		trans->tra_transactions.resize(length);
@@ -3347,7 +3351,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 		TPC_initialize_tpc(tdbb, top);
 	else if (top > base)
 	{
-		if (!trans->tra_base_tra_number.specified)
+		if (!fromBase)
 			TRA_get_inventory(tdbb, trans->tra_transactions.begin(), base, top);
 	}
 
