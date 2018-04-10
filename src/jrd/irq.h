@@ -145,8 +145,6 @@ enum irq_type_t
 	irq_charset,			// DSQL/METD: lookup a character set
 	irq_domain,				// DSQL/METD: lookup a domain
 	irq_type,				// DSQL/METD: lookup a symbolic name in RDB$TYPES
-	irq_col_default,		// DSQL/METD: lookup default for a column
-	irq_domain_2,			// DSQL/METD: lookup a domain
 	irq_cs_name,			// DSQL/METD: lookup a charset name
 	irq_default_cs,			// DSQL/METD: lookup the default charset
 	irq_rel_ids,			// DSQL/METD: check relation/field ids
@@ -175,9 +173,12 @@ enum irq_type_t
 	irq_grant16,			// process grant option (domains)
 	irq_grant17,			// process grant option (database)
 	irq_grant18,			// process grant option (filters)
+	irq_grant19,			// process grant option (roles)
 	irq_l_curr_format,		// lookup table's current format
+	irq_c_relation3,		// lookup relation in phase 0 to cleanup
 
 	irq_linger,				// get database linger value
+	irq_dbb_ss_definer,		// get database sql security value
 
 	irq_MAX
 };

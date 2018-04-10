@@ -631,6 +631,9 @@ struct blh
 	ULONG blh_length;			// Total length of data
 	USHORT blh_sub_type;		// Blob sub-type
 	UCHAR blh_charset;			// Blob charset (since ODS 11.1)
+#ifdef CHECK_BLOB_FIELD_ACCESS_FOR_SELECT
+	USHORT blh_fld_id;			// Field ID
+#endif
 	UCHAR blh_unused;
 	ULONG blh_page[1];			// Page vector for blob pages
 };
@@ -714,5 +717,8 @@ const USHORT RAW_HEADER_SIZE = 1024;	// ROUNDUP(HDR_SIZE, PAGE_ALIGNMENT);
 
 // max number of table formats (aka versions), limited by "UCHAR rhd_format"
 const int MAX_TABLE_VERSIONS = 255;
+
+// max number of view formats (aka versions), limited by "SSHORT RDB$FORMAT"
+const int MAX_VIEW_VERSIONS = MAX_SSHORT;
 
 #endif // JRD_ODS_H

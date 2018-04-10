@@ -46,7 +46,6 @@
 #include "firebird.h"
 #include <stdio.h>
 #include "../yvalve/keywords.h"
-//#include "../yvalve/gds_proto.h"
 #include "../jrd/intl.h"
 #include <stdlib.h>
 #include <stdarg.h>
@@ -79,10 +78,6 @@
 #ifdef HAVE_LOCALE_H
 #include <locale.h>
 #endif
-
-//#ifdef HAVE_IO_H
-//#include <io.h> // mktemp
-//#endif
 
 #ifdef HAVE_EDITLINE_H
 // This is a local file included in our distribution - but not always
@@ -314,6 +309,16 @@ static inline int fb_isdigit(const char c)
 }
 
 
+IsqlGlobals::IsqlGlobals()
+{
+	Firebird::AutoPtr<Firebird::IStatus, Firebird::SimpleDispose>
+		status_vector(fbMaster->getStatus());
+	Firebird::CheckStatusWrapper statusWrapper(status_vector);
+
+	df16 = Firebird::UtilInterfacePtr()->getDecFloat16(&statusWrapper);
+	df34 = Firebird::UtilInterfacePtr()->getDecFloat34(&statusWrapper);
+}
+
 // I s q l G l o b a l s : : p r i n t f
 // Output to the Out stream.
 void IsqlGlobals::printf(const char* buffer, ...)
@@ -367,7 +372,7 @@ static void frontend_load_parms(const TEXT* p, TEXT* parms[], TEXT* lparms[],
 static processing_state do_set_command(const TEXT*, bool*);
 static processing_state get_dialect(const char* const dialect_str,
 	char* const bad_dialect_buf, bool& bad_dialect);
-static processing_state get_statement(TEXT* const, const size_t, const TEXT*);
+static processing_state get_statement(Firebird::string&, const TEXT*);
 static bool get_numeric(const UCHAR*, USHORT, SSHORT*, SINT64*);
 static void print_set(const char* str, bool v);
 static processing_state print_sets();
@@ -390,8 +395,7 @@ static processing_state print_performance(const SINT64* perf_before);
 static void print_message(Firebird::IMessageMetadata* msg, const char* dir);
 static void process_header(Firebird::IMessageMetadata*, const unsigned pad[], TEXT header[], TEXT header2[]);
 static void process_plan();
-static SINT64 process_record_count(const int statement_type);
-static int process_request_type();
+static SINT64 process_record_count(const unsigned statement_type);
 static unsigned process_message_display(Firebird::IMessageMetadata* msg, unsigned pad[]);
 static processing_state process_statement(const TEXT*);
 #ifdef WIN_NT
@@ -458,6 +462,7 @@ public:
 		ExplainPlan = false;
 		Heading = true;
 		BailOnError = false;
+		StmtTimeout = 0;
 		ISQL_charset[0] = 0;
 	}
 
@@ -478,6 +483,7 @@ public:
 	bool ExplainPlan;
 	bool Heading;
 	bool BailOnError;
+	unsigned int StmtTimeout;
 	SCHAR ISQL_charset[MAXCHARSET_SIZE];
 };
 
@@ -587,7 +593,7 @@ static bool D_Transaction()
 // Transaction for all frontend commands
 static bool frontendTransaction()
 {
-	return startTransaction(&fbTrans, sizeof(default_tpb), default_tpb);
+	return startTransaction(&fbTrans);
 }
 
 static void atexit_fb_shutdown()
@@ -1808,7 +1814,8 @@ bool ISQL_is_domain(const TEXT* field_name)
 
 // Print the numeric type as accurately as possible, depending on the ODS.
 // If it isn't numeric/decimal or is another non-numeric data type, print only the type.
-bool ISQL_printNumericType(const char* fieldName, const int fieldType, const int fieldScale)
+bool ISQL_printNumericType(const char* fieldName, const int fieldType, const int fieldSubType,
+	const int fieldPrecision, const int fieldScale)
 {
 	// Look through types array
 	int i = 0;
@@ -1822,62 +1829,75 @@ bool ISQL_printNumericType(const char* fieldName, const int fieldType, const int
 		return false;
 	}
 
-	bool precision_known = false;
-
-	if (isqlGlob.major_ods >= ODS_VERSION10 &&
-		(fieldType == SMALLINT || fieldType == INTEGER || fieldType == BIGINT))
+	switch (fieldType)
 	{
+	case SMALLINT:
+	case INTEGER:
+	case BIGINT:
+	case DOUBLE_PRECISION:
+	case DEC_FIXED_TYPE:
 		// Handle Integral subtypes NUMERIC and DECIMAL
 		// We are ODS >= 10 and could be any Dialect
-		FOR FLD1 IN RDB$FIELDS WITH
-			FLD1.RDB$FIELD_NAME EQ fieldName
-			AND NOT FLD1.RDB$FIELD_PRECISION EQ 0
 
-			// We are Dialect >=3 since FIELD_PRECISION is non-NULL
-			if (FLD1.RDB$FIELD_SUB_TYPE > 0 && FLD1.RDB$FIELD_SUB_TYPE <= MAX_INTSUBTYPES)
-			{
-				isqlGlob.printf("%s(%d, %d)",
-						 Integral_subtypes[FLD1.RDB$FIELD_SUB_TYPE],
-						 FLD1.RDB$FIELD_PRECISION,
-						 -FLD1.RDB$FIELD_SCALE);
-				precision_known = true;
-			}
-		END_FOR
-		ON_ERROR
-			ISQL_errmsg (fbStatus);
-			return false;
-		END_ERROR;
-	}
-
-	if (!precision_known)
-	{
-		if (fieldScale < 0)
+		// We are Dialect >=3 since FIELD_PRECISION is non-NULL
+		if (isqlGlob.major_ods >= ODS_VERSION10 &&
+			fieldPrecision != 0 &&
+			fieldType != DOUBLE_PRECISION &&
+			fieldSubType > 0 && fieldSubType <= MAX_INTSUBTYPES)
 		{
-			// Take a stab at numerics and decimals
-			switch (fieldType)
-			{
-			case SMALLINT:
-				isqlGlob.printf("NUMERIC(4, %d)", -fieldScale);
-				break;
-			case INTEGER:
-				isqlGlob.printf("NUMERIC(9, %d)", -fieldScale);
-				break;
-			case BIGINT:
-				isqlGlob.printf("NUMERIC(18, %d)", -fieldScale);
-				break;
-			case DOUBLE_PRECISION:
-				isqlGlob.printf("NUMERIC(15, %d)", -fieldScale);
-				break;
-			default:
-				isqlGlob.printf("%s", Column_types[i].type_name);
-			}
+			isqlGlob.printf("%s(%d, %d)",
+				Integral_subtypes[fieldSubType],
+				fieldPrecision,
+				-fieldScale);
 		}
 		else
 		{
-			// This is a non-numeric data type
-			isqlGlob.printf("%s", Column_types[i].type_name);
+			if (fieldScale < 0)
+			{
+				// Take a stab at numerics and decimals
+				switch (fieldType)
+				{
+				case SMALLINT:
+					isqlGlob.printf("NUMERIC(4, %d)", -fieldScale);
+					break;
+				case INTEGER:
+					isqlGlob.printf("NUMERIC(9, %d)", -fieldScale);
+					break;
+				case BIGINT:
+					isqlGlob.printf("NUMERIC(18, %d)", -fieldScale);
+					break;
+				case DOUBLE_PRECISION:
+					isqlGlob.printf("NUMERIC(15, %d)", -fieldScale);
+					break;
+				case DEC_FIXED_TYPE:
+					isqlGlob.printf("NUMERIC(34, %d)", -fieldScale);
+					break;
+				}
+			}
+			else
+			{
+				break;
+			}
 		}
+		return true;
+	case T_CHAR:
+		if (fieldSubType >= 0 && fieldSubType <= MAX_TEXTSUBTYPES)
+		{
+			isqlGlob.printf("%s", Text_subtypes[fieldSubType]);
+			return true;
+		}
+		break;
+	case VARCHAR:
+		if (fieldSubType >= 0 && fieldSubType <= MAX_VARYINGSUBTYPES)
+		{
+			isqlGlob.printf("%s", Varying_subtypes[fieldSubType]);
+			return true;
+		}
+		break;
 	}
+
+	// Field type without recognizable subtypes
+	isqlGlob.printf("%s", Column_types[i].type_name);
 
 	return true;
 }
@@ -1962,6 +1982,50 @@ void ISQL_print_validation(FILE* fp,
 		ISQL_errmsg(fbStatus);
 
 	blob->close(fbStatus);
+}
+
+
+static Firebird::string get_numeric_value(const char* fromStr)
+{
+/**************************************
+ *
+ *	g e t _ n u m e r i c _ v a l u e
+ *
+ **************************************
+ *
+ * Functional description
+ *	Prepares data for converting into decfloat by interface function.
+ *
+ **************************************/
+	Firebird::string val;
+	for (const char* q = fromStr; *q; ++q)
+	{
+		switch (*q)
+		{
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+		case '.':
+		case '+':
+		case '-':
+		case 'e':
+		case 'E':
+			val += *q;
+			break;
+
+		default:
+			return val;
+		}
+	}
+
+	return val;
 }
 
 
@@ -2219,6 +2283,8 @@ static processing_state add_row(TEXT* tabname)
 				SINT64 n;
 				float* fvalue;
 				double* dvalue;
+				FB_DEC16* d64value;
+				FB_DEC34* d128value;
 				UCHAR* boolean;
 				ISC_QUAD* blobid;
 				vary* avary;
@@ -2279,6 +2345,29 @@ static processing_state add_row(TEXT* tabname)
 				case SQL_DOUBLE:
 					dvalue = (double*) datap;
 					if (sscanf(lastInputLine, "%lg", dvalue) != 1)
+					{
+						STDERROUT("Input parsing problem");
+						done = true;
+					}
+					break;
+
+				case SQL_DEC16:
+					d64value = (FB_DEC16*) datap;
+					if (isqlGlob.df16)
+						isqlGlob.df16->fromString(fbStatus, lastInputLine, d64value);
+					if ((!isqlGlob.df16) || (fbStatus->getState() & Firebird::IStatus::STATE_ERRORS))
+					{
+						STDERROUT("Input parsing problem");
+						done = true;
+					}
+					break;
+
+				case SQL_DEC_FIXED:
+				case SQL_DEC34:
+					d128value = (FB_DEC34*) datap;
+					if (isqlGlob.df34)
+						isqlGlob.df34->fromString(fbStatus, lastInputLine, d128value);
+					if ((!isqlGlob.df34) || (fbStatus->getState() & Firebird::IStatus::STATE_ERRORS))
 					{
 						STDERROUT("Input parsing problem");
 						done = true;
@@ -2662,15 +2751,17 @@ static processing_state bulk_insert_hack(const char* command)
 	ISQL_warning(fbStatus);
 
 	// Find out what kind of statement this is
-	const int statement_type = process_request_type();
+	const unsigned statement_type = global_Stmt->getType(fbStatus);
 	if (!statement_type)
 		return ps_ERR;
 
+	/*** ASF: This is util to test others commands too.
 	if (statement_type != isc_info_sql_stmt_insert)
 	{
 		isqlGlob.printf("Only INSERT commands are accepted in bulk mode.%s", NEWLINE);
 		return ps_ERR;
 	}
+	***/
 
 	Firebird::RefPtr<Firebird::IMessageMetadata> message(global_Stmt->getInputMetadata(fbStatus));
 	if (ISQL_errmsg(fbStatus))
@@ -2972,6 +3063,8 @@ static processing_state bulk_insert_hack(const char* command)
 				vary* avary;
 				char* achar;
 				tm times;
+				FB_DEC16* d64value;
+				FB_DEC34* d128value;
 				// Initialize the time structure.
 				memset(&times, 0, sizeof(times));
 				char msec_str[5] = "";
@@ -3027,6 +3120,29 @@ static processing_state bulk_insert_hack(const char* command)
 					if (sscanf(lastPos, "%lg", dvalue) != 1)
 					{
 						STDERROUT("Input parsing problem in 'double' value");
+						done = true;
+					}
+					break;
+
+				case SQL_DEC16:
+					d64value = (FB_DEC16*) datap;
+					if (isqlGlob.df16)
+						isqlGlob.df16->fromString(fbStatus, get_numeric_value(lastPos).c_str(), d64value);
+					if ((!isqlGlob.df16) || (fbStatus->getState() & Firebird::IStatus::STATE_ERRORS))
+					{
+						STDERROUT("Input parsing problem");
+						done = true;
+					}
+					break;
+
+				case SQL_DEC34:
+				case SQL_DEC_FIXED:
+					d128value = (FB_DEC34*) datap;
+					if (isqlGlob.df34)
+						isqlGlob.df34->fromString(fbStatus, get_numeric_value(lastPos).c_str(), d128value);
+					if ((!isqlGlob.df34) || (fbStatus->getState() & Firebird::IStatus::STATE_ERRORS))
+					{
+						STDERROUT("Input parsing problem");
 						done = true;
 					}
 					break;
@@ -3846,9 +3962,7 @@ static void do_isql()
 	// Read statements and process them from Ifp until the ret
 	// code tells us we are done
 
-	Firebird::Array<TEXT> stmt;
-	const size_t stmtLength = MAX_SQL_LENGTH;
-	TEXT* statement = stmt.getBuffer(stmtLength);
+	Firebird::string stmt;
 	processing_state ret;
 
 	bool done = false;
@@ -3914,7 +4028,7 @@ static void do_isql()
 			}
 		}
 
-		ret = get_statement(statement, stmtLength, sql_prompt);
+		ret = get_statement(stmt, sql_prompt);
 
 		// If there is no database yet, remind us of the need to connect
 
@@ -3936,7 +4050,7 @@ static void do_isql()
 		switch (ret)
 		{
 		case CONT:
-			if (process_statement(statement) == ps_ERR)
+			if (process_statement(stmt.c_str()) == ps_ERR)
 			{
 				Exit_value = FINI_ERROR;
 				if (!Interactive && setValues.BailOnError)
@@ -4205,7 +4319,8 @@ static processing_state edit(const TEXT* const* cmd)
 		Ofp.close();
 		PathName tmpfile = Ofp.fileName(false);
 		gds__edit(tmpfile.c_str(), 0);
-		Ofp.init(os_utils::fopen(tmpfile.c_str(), "r+"), tmpfile.c_str(), tmpfile.c_str()); // We don't check for failure.
+		Ofp.init(os_utils::fopen(tmpfile.c_str(), "r+"),
+			tmpfile.c_str(), tmpfile.c_str()); // We don't check for failure.
 		Filelist->Ifp().init(Ofp);
 		Input_file = true;
 		getColumn = -1;
@@ -4762,7 +4877,8 @@ static processing_state frontend_set(const char* cmd, const char* const* parms,
 			sqlda_display,
 //#endif
 			sql, warning, sqlCont, heading, bail,
-			bulk_insert, maxrows, wrong
+			bulk_insert, maxrows, stmtTimeout,
+			wrong
 		};
 		SetOptions(const optionsMap* inmap, size_t insize, int wrongval)
 			: OptionsBase(inmap, insize, wrongval)
@@ -4800,6 +4916,8 @@ static processing_state frontend_set(const char* cmd, const char* const* parms,
 		{SetOptions::maxrows, "MAXROWS", 0},
 		{SetOptions::sqlCont, "ROLE", 0},
 		{SetOptions::sqlCont, "TRUSTED", 0},	// TRUSTED ROLE, will get DSQL error other case
+		{SetOptions::stmtTimeout, "LOCAL_TIMEOUT", 0},
+		{SetOptions::sqlCont, "DECFLOAT", 0},
 	};
 
 	// Display current set options
@@ -4961,14 +5079,28 @@ static processing_state frontend_set(const char* cmd, const char* const* parms,
 		ret = newMaxRows((*lparms[2]) ? lparms[2] : "0");
 		break;
 
-	default:
+	case SetOptions::stmtTimeout:
 		{
-			TEXT msg_string[MSG_LENGTH];
-			IUTILS_msg_get(VALID_OPTIONS, msg_string);
-			isqlGlob.printf("%s\n", msg_string);
+			int val = strtol(parms[2], NULL, 10);
+			if (val < 0)
+				ret = ps_ERR;
+			else
+			{
+				setValues.StmtTimeout = val;
+				ret = SKIP;
+			}
 		}
-		setoptions.showCommands(isqlGlob.Out);
-		ret = ps_ERR;
+		break;
+
+	default:
+		//{
+		//	TEXT msg_string[MSG_LENGTH];
+		//	IUTILS_msg_get(VALID_OPTIONS, msg_string);
+		//	isqlGlob.printf("%s\n", msg_string);
+		//}
+		//setoptions.showCommands(isqlGlob.Out);
+		//ret = ps_ERR;
+		ret = CONT;	// pass unknown SET command to server as is
 		break;
 	}
 
@@ -5114,8 +5246,7 @@ static processing_state get_dialect(const char* const dialect_str,
 }
 
 
-static processing_state get_statement(TEXT* const statement,
-							const size_t bufsize,
+static processing_state get_statement(Firebird::string& statement,
 							const TEXT* statement_prompt)
 {
 /**************************************
@@ -5141,13 +5272,10 @@ static processing_state get_statement(TEXT* const statement,
 	}
 
 	// Clear out statement buffer
-
-	TEXT* p = statement;
-	*p = '\0';
+	statement.resize(0);
 
 	// Set count of characters to zero
 
-	size_t count = 0;
 	size_t valuable_count = 0; // counter of valuable (non-space) chars
 	size_t comment_pos = 0; // position of block comment start
 	size_t non_comment_pos = 0; // position of char after block comment
@@ -5229,7 +5357,7 @@ static processing_state get_statement(TEXT* const statement,
 			}
 
 			// Catch the help ? without a terminator
-			if (*statement == '?' && count == 1)
+			if (statement.length() == 1 && statement[0] == '?')
 			{
 				c = 0;
 				done = true;
@@ -5259,7 +5387,8 @@ static processing_state get_statement(TEXT* const statement,
 
 		case '-':
 			// Could this the be start of a single-line comment.
-			if (state == normal && count > 0 && p[-1] == '-')
+			if (state == normal && statement.length() > 0 &&
+				statement[statement.length() - 1] == '-')
 			{
 				state = in_single_line_comment;
 				if (valuable_count == 1)
@@ -5272,10 +5401,11 @@ static processing_state get_statement(TEXT* const statement,
 			// not forward.
 			// Ignore possibilities of a comment beginning inside
 			// quoted strings.
-			if (state == normal && count > 0 && p[-1] == '/' && count != non_comment_pos)
+			if (state == normal && statement.length() > 0 &&
+				statement[statement.length() - 1] == '/' && statement.length() != non_comment_pos)
 			{
 				state = in_block_comment;
-				comment_pos = count - 1;
+				comment_pos = statement.length() - 1;
 				if (valuable_count == 1)
 					valuable_count = 0;
 			}
@@ -5286,10 +5416,11 @@ static processing_state get_statement(TEXT* const statement,
 			// Ignore possibilities of a comment ending inside
 			// quoted strings.
 			// Ignore things like /*/ since it isn't a block comment; only the start of it. Or end.
-			if (state == in_block_comment && count > 2 && p[-1] == '*' && count > comment_pos + 2)
+			if (state == in_block_comment && statement.length() > 2 &&
+				statement[statement.length() - 1] == '*' && statement.length() > comment_pos + 2)
 			{
 				state = normal;
-				non_comment_pos = count + 1; // mark start of non-comment to track this: /**/*
+				non_comment_pos = statement.length() + 1; // mark start of non-comment to track this: /**/*
 				valuable_count--; // This char is not valuable
 			}
 			break;
@@ -5300,8 +5431,7 @@ static processing_state get_statement(TEXT* const statement,
 				case normal:
 					if (lastChar == 'q' || lastChar == 'Q')
 					{
-						*p++ = lastChar = c;
-						count++;
+						statement += (lastChar = c);
 						altQuoteChar = c = getNextInputChar();
 
 						switch (altQuoteChar)
@@ -5350,12 +5480,12 @@ static processing_state get_statement(TEXT* const statement,
 				// one-char terminator or the beginning also match
 				(isqlGlob.Termlen == 1u ||
 				 (valuable_count >= term_length &&
-				  strncmp(p - term_length, isqlGlob.global_Term, term_length) == 0)))
+				  strncmp(&statement[statement.length() - term_length],
+				  	isqlGlob.global_Term, term_length) == 0)))
 			{
 				c = 0;
 				done = true;
-				p -= term_length;
-				count -= term_length;
+				statement.resize(statement.length() - term_length);
 			}
 		}
 
@@ -5368,42 +5498,27 @@ static processing_state get_statement(TEXT* const statement,
 			if (valuable_count == 1) // this is the first valuable char in stream
 			{
 				// ignore all previous crap
-				p = statement;
-				count = 0;
+				statement.resize(0);
 				non_comment_pos = 0;
 			}
 		}
 
-		*p++ = lastChar = c;
-		count++;
-
-		if (count > bufsize && !done)
-		{
-				ret = ERR_BUFFER_OVERFLOW;
-
-				// move some content to start of buffer just in case if
-				// the overflow has splitted terminator
-				count = MAX(isqlGlob.Termlen, 2u);
-				memcpy(statement, p - count, count);
-				p = statement + count;
-				*p = '\0';
-		}
-
+		statement += (lastChar = c);
 	}
 
 	// If this was a null statement, skip it
-	if (ret == CONT && !*statement)
+	if (ret == CONT && statement.isEmpty())
 		ret = SKIP;
 
 	if (ret == CONT)
-		ret = frontend(statement);
+		ret = frontend(statement.c_str());
 
 	if (ret == CONT)
 	{
 		// Place each non frontend statement in the temp file if we are reading
 		// from stdin.
 
-		Filelist->saveCommand(statement, isqlGlob.global_Term);
+		Filelist->saveCommand(statement.c_str(), isqlGlob.global_Term);
 	}
 
 	return ret;
@@ -5429,7 +5544,7 @@ void ISQL_get_version(bool call_by_create_db)
 		isc_info_ods_minor_version,
 		isc_info_db_sql_dialect,
 		frb_info_att_charset,
-		Version_info ? isc_info_firebird_version: isc_info_end,
+		UCHAR(Version_info ? isc_info_firebird_version: isc_info_end),
 		isc_info_end
 	};
 	/*
@@ -5807,6 +5922,7 @@ static processing_state print_sets()
 	print_set("Time:", setValues.Time_display);
 	print_set("Warnings:", setValues.Warnings);
 	print_set("Bail on error:", setValues.BailOnError);
+	isqlGlob.printf("%-25s%lu%s", "Local statement timeout:", setValues.StmtTimeout, NEWLINE);
 	return SKIP;
 }
 
@@ -6915,7 +7031,7 @@ static bool checkSpecial(TEXT* const p, const int length, const double value)
 	if (isnan(value))
 		t = "NaN";
 	else if (isinf(value))
-		t = "Infinity";
+		t = Firebird::isNegativeInf(value) ? "-Infinity" : "Infinity";
 	else
 		return false;
 
@@ -6940,8 +7056,8 @@ static unsigned print_item(TEXT** s, const IsqlVar* var, const unsigned length)
  *	Print an SQL data item as described.
  *
  **************************************/
+	const char* convErr = "Conversion error";
  	TEXT d[32];
-
 	TEXT* p = *s;
 	*p = '\0';
 
@@ -7165,6 +7281,45 @@ static unsigned print_item(TEXT** s, const IsqlVar* var, const unsigned length)
 					}
 #endif
 				}
+			}
+			break;
+
+		case SQL_DEC16:
+			{
+				char decStr[Firebird::IDecFloat16::STRING_SIZE];
+				if (isqlGlob.df16)
+				{
+					isqlGlob.df16->toString(fbStatus, var->value.asDec16, sizeof(decStr), decStr);
+					if (ISQL_errmsg(fbStatus))
+						strcpy(decStr, convErr);
+				}
+				else
+					strcpy(decStr, convErr);
+
+				if (setValues.List)
+					isqlGlob.printf("%*.*s%s", sizeof(decStr) - 1, sizeof(decStr) - 1, decStr, NEWLINE);
+				else
+					sprintf(p, "%*.*s ", sizeof(decStr) - 1, sizeof(decStr) - 1, decStr);
+			}
+			break;
+
+		case SQL_DEC34:
+		case SQL_DEC_FIXED:
+			{
+				char decStr[Firebird::IDecFloat34::STRING_SIZE];
+				if (isqlGlob.df34)
+				{
+					isqlGlob.df34->toString(fbStatus, var->value.asDec34, sizeof(decStr), decStr);
+					if (ISQL_errmsg(fbStatus))
+						strcpy(decStr, convErr);
+				}
+				else
+					strcpy(decStr, convErr);
+
+				if (setValues.List)
+					isqlGlob.printf("%*.*s%s", sizeof(decStr) - 1, sizeof(decStr) - 1, decStr, NEWLINE);
+				else
+					sprintf(p, "%*.*s ", sizeof(decStr) - 1, sizeof(decStr) - 1, decStr);
 			}
 			break;
 
@@ -7600,7 +7755,7 @@ static processing_state print_performance(const SINT64* perf_before)
 	{
 		TEXT report_1[MSG_LENGTH];
 		IUTILS_msg_get(REPORT_NEW1, report_1);
-		// Current memory = !\nDelta memory = !\nMax memory = !\nElapsed time= ~ sec\n
+		// Current memory = !\nDelta memory = !\nMax memory = !\nElapsed time = ~ sec\n
 		diag->assign(report_1);
 
 #ifndef WIN_NT
@@ -7784,7 +7939,7 @@ static void process_plan()
 			case isc_info_sql_get_plan:
 			case isc_info_sql_explain_plan:
 				{
-					const ULONG len = gds__vax_integer(ptr, sizeof(USHORT));
+					const USHORT len = (USHORT) gds__vax_integer(ptr, sizeof(USHORT));
 					ptr += sizeof(USHORT);
 					planString.assign((const char*) ptr, len);
 					ptr += len;
@@ -7828,7 +7983,7 @@ static void process_plan()
 // Get number of records affected for updates, deletions and insertions.
 // Return -1 if the statement is not one of those or if there's an error
 // retrieving the information from the server.
-static SINT64 process_record_count(const int statement_type)
+static SINT64 process_record_count(const unsigned statement_type)
 {
 	if (!global_Stmt)
 		return -1;
@@ -7883,34 +8038,6 @@ static SINT64 process_record_count(const int statement_type)
 }
 
 
-// ***************************************
-// p r o c e s s _ r e q u e s t _ t y p e
-// ***************************************
-// Retrieve the statement type according to the DSQL layer.
-// A failure is indicated by returning zero.
-static int process_request_type()
-{
-	if (!global_Stmt)
-		return 0;
-	const UCHAR sqlda_info[] = { isc_info_sql_stmt_type };
-	UCHAR info_buffer[16];
-	global_Stmt->getInfo(fbStatus, sizeof(sqlda_info), sqlda_info, sizeof(info_buffer), info_buffer);
-	if (!ISQL_errmsg(fbStatus))
-	{
-		if (info_buffer[0] == isc_info_sql_stmt_type)
-		{
-		    const UCHAR* b = info_buffer;
-			const SSHORT len = gds__vax_integer(b + 1, 2);
-			return gds__vax_integer(b + 3, len);
-		}
-
-		//IUTILS_msg_get(UNKNOWN_STATEMENT_TYPE, errmsg);
-		STDERROUT("Cannot determine statement type");
-	}
-	return 0;
-}
-
-
 // *********************************************
 // p r o c e s s _ m e s s a g e _ d i s p l a y
 // *********************************************
@@ -7944,6 +8071,7 @@ static unsigned process_message_display(Firebird::IMessageMetadata* message, uns
 			namelength = NULL_DISP_LEN;
 
 		const unsigned type = var.type;
+		const SSHORT charSet = TTYPE_TO_CHARSET(var.charSet);
 
 		switch (type)
 		{
@@ -7971,26 +8099,33 @@ static unsigned process_message_display(Firebird::IMessageMetadata* message, uns
 		case SQL_DOUBLE:
 			disp_length = DOUBLE_LEN;
 			break;
+		case SQL_DEC16:
+			disp_length = Firebird::IDecFloat16::STRING_SIZE - 1;
+			break;
+		case SQL_DEC_FIXED:
+		case SQL_DEC34:
+			disp_length = Firebird::IDecFloat34::STRING_SIZE - 1;
+			break;
 		case SQL_TEXT:
 			alignment = 1;
 			data_length++;
 			// OCTETS data is displayed in hex
-			if (var.charSet == CS_BINARY)
+			if (charSet == CS_BINARY)
 				disp_length = 2 * var.length;
-			else if (var.charSet == CS_UNICODE_FSS)
+			else if (charSet == CS_UNICODE_FSS)
 				disp_length /= 3;
-			else if (var.charSet == CS_UTF8)
+			else if (charSet == CS_UTF8)
 				disp_length /= 4;
 			break;
 		case SQL_VARYING:
 			data_length += sizeof(USHORT) + 1;
 			alignment = sizeof(USHORT);
 			// OCTETS data is displayed in hex
-			if (var.charSet == CS_BINARY)
+			if (charSet == CS_BINARY)
 				disp_length = 2 * var.length;
-			else if (var.charSet == CS_UNICODE_FSS)
+			else if (charSet == CS_UNICODE_FSS)
 				disp_length /= 3;
-			else if (var.charSet == CS_UTF8)
+			else if (charSet == CS_UTF8)
 				disp_length /= 4;
 			break;
 		case SQL_SHORT:
@@ -8032,7 +8167,7 @@ static unsigned process_message_display(Firebird::IMessageMetadata* message, uns
 				pad[i] = setValues.global_Col_default;
 			disp_length = pad[i];
 
-			if (var.charSet == 4)
+			if (charSet == CS_UTF8)
 				disp_length *= 4;
 		}
 
@@ -8144,8 +8279,12 @@ static processing_state process_statement(const TEXT* str2)
 	// check for warnings
 	ISQL_warning(fbStatus);
 
+	global_Stmt->setTimeout(fbStatus, setValues.StmtTimeout);
+	if (ISQL_errmsg(fbStatus))
+		setValues.StmtTimeout = 0;
+
 	// Find out what kind of statement this is
-	const int statement_type = process_request_type();
+	const unsigned statement_type = global_Stmt->getType(fbStatus);
 	if (!statement_type)
 		return ps_ERR;
 
@@ -8207,6 +8346,7 @@ static processing_state process_statement(const TEXT* str2)
 			 statement_type == isc_info_sql_stmt_set_generator))
 		{
 			DB->execute(fbStatus, D__trans, 0, str2, isqlGlob.SQL_dialect, NULL, NULL, NULL, NULL);
+			setValues.StmtTimeout = 0;
 			if (ISQL_errmsg(fbStatus))
 			{
 				ret = ps_ERR;
@@ -8249,6 +8389,7 @@ static processing_state process_statement(const TEXT* str2)
 		//  This is a non-select DML statement or trans
 
 		M__trans = global_Stmt->execute(fbStatus, M__trans, NULL, NULL, NULL, NULL);
+		setValues.StmtTimeout = 0;
 		if (ISQL_errmsg(fbStatus))
 		{
 			// CVC: Make this conditional if it causes problems. For example
@@ -8351,6 +8492,7 @@ static processing_state process_statement(const TEXT* str2)
 	if (statement_type == isc_info_sql_stmt_exec_procedure)
 	{
 		global_Stmt->execute(fbStatus, M__trans, NULL, NULL, message, buffer);
+		setValues.StmtTimeout = 0;
 		if (ISQL_errmsg(fbStatus))
 		{
 			ret = ps_ERR;
@@ -8380,6 +8522,7 @@ static processing_state process_statement(const TEXT* str2)
 
 		Firebird::IResultSet* curs = global_Stmt->openCursor(fbStatus, M__trans,
 			NULL, NULL, message, 0);
+		setValues.StmtTimeout = 0;
 		if (ISQL_errmsg(fbStatus))
 		{
 			return ps_ERR;
@@ -8541,7 +8684,8 @@ static bool stdin_redirected()
 {
 #ifdef WIN_NT
 	HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
-	if (GetFileType(in) == FILE_TYPE_CHAR) //FILE_TYPE_DISK)
+	const DWORD file_type = GetFileType(in);
+	if (file_type == FILE_TYPE_CHAR || file_type == FILE_TYPE_PIPE)
 		return false;
 #else
 	if (isatty(fileno(stdin)))
@@ -8614,6 +8758,12 @@ static const char* sqltype_to_string(unsigned sqltype)
 		return "FLOAT";
 	case SQL_DOUBLE:
 		return "DOUBLE";
+	case SQL_DEC16:
+		return "DECFLOAT(16)";
+	case SQL_DEC34:
+		return "DECFLOAT(34)";
+	case SQL_DEC_FIXED:
+		return "DECIMAL FIXED";
 	case SQL_D_FLOAT:
 		return "D_FLOAT";
 	case SQL_TIMESTAMP:

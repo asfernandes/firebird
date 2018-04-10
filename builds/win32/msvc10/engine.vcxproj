@@ -37,6 +37,7 @@
     <ClCompile Include="..\..\..\src\dsql\BoolNodes.cpp" />
     <ClCompile Include="..\..\..\src\dsql\ddl.cpp" />
     <ClCompile Include="..\..\..\src\dsql\dsql.cpp" />
+    <ClCompile Include="..\..\..\src\dsql\DsqlBatch.cpp" />
     <ClCompile Include="..\..\..\src\dsql\DsqlCompilerScratch.cpp" />
     <ClCompile Include="..\..\..\src\dsql\DsqlCursor.cpp" />
     <ClCompile Include="..\..\..\src\dsql\DSqlDataTypeUtil.cpp" />
@@ -168,6 +169,7 @@
     <ClInclude Include="..\..\..\src\dsql\DdlNodes.h" />
     <ClInclude Include="..\..\..\src\dsql\ddl_proto.h" />
     <ClInclude Include="..\..\..\src\dsql\dsql.h" />
+    <ClInclude Include="..\..\..\src\dsql\DsqlBatch.h" />
     <ClInclude Include="..\..\..\src\dsql\DsqlCompilerScratch.h" />
     <ClInclude Include="..\..\..\src\dsql\DsqlCursor.h" />
     <ClInclude Include="..\..\..\src\dsql\DSqlDataTypeUtil.h" />
@@ -267,9 +269,9 @@
     <ClInclude Include="..\..\..\src\jrd\license.h" />
     <ClInclude Include="..\..\..\src\jrd\lls.h" />
     <ClInclude Include="..\..\..\src\jrd\Mapping.h" />
+    <ClInclude Include="..\..\..\src\jrd\Monitoring.h" />
     <ClInclude Include="..\..\..\src\jrd\met.h" />
     <ClInclude Include="..\..\..\src\jrd\met_proto.h" />
-    <ClInclude Include="..\..\..\src\jrd\Monitoring.h" />
     <ClInclude Include="..\..\..\src\jrd\mov_proto.h" />
     <ClInclude Include="..\..\..\src\jrd\msg.h" />
     <ClInclude Include="..\..\..\src\jrd\msg_encode.h" />
@@ -483,6 +485,7 @@
       <AdditionalDependencies>mpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>../../../extern/icu/$(Platform)/release/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>..\defs\plugin.def</ModuleDefinitionFile>
+      <SubSystem>Windows</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -502,6 +505,7 @@
       <AdditionalDependencies>mpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>../../../extern/icu/$(Platform)/release/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>..\defs\plugin.def</ModuleDefinitionFile>
+      <SubSystem>Windows</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -522,6 +526,7 @@
       <AdditionalDependencies>mpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>../../../extern/icu/$(Platform)/$(Configuration)/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>..\defs\plugin.def</ModuleDefinitionFile>
+      <SubSystem>Windows</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -546,6 +551,7 @@
       <AdditionalDependencies>mpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>../../../extern/icu/$(Platform)/$(Configuration)/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <ModuleDefinitionFile>..\defs\plugin.def</ModuleDefinitionFile>
+      <SubSystem>Windows</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

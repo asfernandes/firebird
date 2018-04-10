@@ -40,6 +40,11 @@
 #include <locale.h>
 #endif
 
+#ifdef WIN_NT
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 namespace Firebird {
 
 class TraceSvcUtil : public TraceSvcIntf
@@ -48,8 +53,8 @@ public:
 	TraceSvcUtil();
 	virtual ~TraceSvcUtil();
 
-	virtual void setAttachInfo(const string& service_name, const string& user, const string& pwd,
-		const AuthReader::AuthBlock& authBlock, bool isAdmin);
+	virtual void setAttachInfo(const string& service_name, const string& user, const string& role,
+		const string& pwd, const AuthReader::AuthBlock& authBlock, bool isAdmin);
 
 	virtual void startSession(TraceSession& session, bool interactive);
 	virtual void stopSession(ULONG id);
@@ -79,8 +84,8 @@ TraceSvcUtil::~TraceSvcUtil()
 	}
 }
 
-void TraceSvcUtil::setAttachInfo(const string& service_name, const string& user, const string& pwd,
-		const AuthReader::AuthBlock& /*authBlock*/, bool isAdmin)
+void TraceSvcUtil::setAttachInfo(const string& service_name, const string& user, const string& role,
+	const string& pwd, const AuthReader::AuthBlock& /*authBlock*/, bool isAdmin)
 {
 	ISC_STATUS_ARRAY status = {0};
 
@@ -91,6 +96,9 @@ void TraceSvcUtil::setAttachInfo(const string& service_name, const string& user,
 	}
 	if (pwd.hasData()) {
 		spb.insertString(isc_spb_password, pwd);
+	}
+	if (role.hasData()) {
+		spb.insertString(isc_spb_sql_role_name, role);
 	}
 	if (isAdmin) {
 		spb.insertTag(isc_spb_trusted_auth);
@@ -308,6 +316,11 @@ int CLIB_ROUTINE main(int argc, char* argv[])
 #ifdef HAVE_LOCALE_H
 	// Pick up the system locale to allow SYSTEM<->UTF8 conversions
 	setlocale(LC_CTYPE, "");
+#endif
+
+#ifdef WIN_NT
+	int binout = fileno(stdout);
+	_setmode(binout, _O_BINARY);
 #endif
 
 	atexit(&atexit_fb_shutdown);

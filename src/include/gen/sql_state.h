@@ -814,6 +814,97 @@ static const struct {
 	{335545111, "0A000"}, // 791 wrong_prvlg
 	{335545112, "28000"}, // 792 miss_prvlg
 	{335545113, "XX000"}, // 793 crypt_checksum
+	{335545114, "28000"}, // 794 not_dba
+	{335545115, "07005"}, // 795 no_cursor
+	{335545116, "42000"}, // 796 dsql_window_incompat_frames
+	{335545117, "42000"}, // 797 dsql_window_range_multi_key
+	{335545118, "42000"}, // 798 dsql_window_range_inv_key_type
+	{335545119, "42000"}, // 799 dsql_window_frame_value_inv_type
+	{335545120, "42000"}, // 800 window_frame_value_invalid
+	{335545121, "42000"}, // 801 dsql_window_not_found
+	{335545122, "42000"}, // 802 dsql_window_cant_overr_part
+	{335545123, "42000"}, // 803 dsql_window_cant_overr_order
+	{335545124, "42000"}, // 804 dsql_window_cant_overr_frame
+	{335545125, "42000"}, // 805 dsql_window_duplicate
+	{335545126, "54001"}, // 806 sql_too_long
+	{335545127, "HY008"}, // 807 cfg_stmt_timeout
+	{335545128, "HY008"}, // 808 att_stmt_timeout
+	{335545129, "HY008"}, // 809 req_stmt_timeout
+	{335545130, "08003"}, // 810 att_shut_killed
+	{335545131, "08003"}, // 811 att_shut_idle
+	{335545132, "08003"}, // 812 att_shut_db_down
+	{335545133, "08003"}, // 813 att_shut_engine
+	{335545134, "42000"}, // 814 overriding_without_identity
+	{335545135, "42000"}, // 815 overriding_system_invalid
+	{335545136, "42000"}, // 816 overriding_user_invalid
+	{335545137, "42000"}, // 817 overriding_system_missing
+	{335545138, "HY104"}, // 818 decprecision_err
+	{335545139, "22012"}, // 819 decfloat_divide_by_zero
+	{335545140, "22000"}, // 820 decfloat_inexact_result
+	{335545141, "22000"}, // 821 decfloat_invalid_operation
+	{335545142, "22003"}, // 822 decfloat_overflow
+	{335545143, "22003"}, // 823 decfloat_underflow
+	{335545144, "42000"}, // 824 subfunc_notdef
+	{335545145, "42000"}, // 825 subproc_notdef
+	{335545146, "42000"}, // 826 subfunc_signat
+	{335545147, "42000"}, // 827 subproc_signat
+	{335545148, "42000"}, // 828 subfunc_defvaldecl
+	{335545149, "42000"}, // 829 subproc_defvaldecl
+	{335545150, "42000"}, // 830 subfunc_not_impl
+	{335545151, "42000"}, // 831 subproc_not_impl
+	{335545152, "42000"}, // 832 sysf_invalid_hash_algorithm
+	{335545153, "42000"}, // 833 expression_eval_index
+	{335545154, "42000"}, // 834 decfloat_trap
+	{335545155, "42000"}, // 835 decfloat_round
+	{335545156, "42000"}, // 836 sysf_invalid_first_last_part
+	{335545157, "42000"}, // 837 sysf_invalid_date_timestamp
+	{335545158, "HY104"}, // 838 precision_err2
+	{335545159, "08003"}, // 839 bad_batch_handle
+	{335545160, "22021"}, // 840 intl_char
+	{335545161, "22000"}, // 841 null_block
+	{335545162, "22000"}, // 842 mixed_info
+	{335545163, "22000"}, // 843 unknown_info
+	{335545164, "22000"}, // 844 bpb_version
+	{335545165, "28000"}, // 845 user_manager
+	{335545166, "XX000"}, // 846 icu_entrypoint
+	{335545167, "XX000"}, // 847 icu_library
+	{335545168, "02000"}, // 848 metadata_name
+	{335545169, "42000"}, // 849 tokens_parse
+	{335545170, "08006"}, // 850 iconv_open
+	{335545171, "07002"}, // 851 batch_compl_range
+	{335545172, "07002"}, // 852 batch_compl_detail
+	{335545173, "08006"}, // 853 deflate_init
+	{335545174, "08006"}, // 854 inflate_init
+	{335545175, "22026"}, // 855 big_segment
+	{335545176, "22000"}, // 856 batch_policy
+	{335545177, "22000"}, // 857 batch_defbpb
+	{335545178, "22000"}, // 858 batch_align
+	{335545179, "22000"}, // 859 multi_segment_dup
+	{335545180, "08004"}, // 860 non_plugin_protocol
+	{335545181, "22000"}, // 861 message_format
+	{335545182, "22000"}, // 862 batch_param_version
+	{335545183, "54000"}, // 863 batch_msg_long
+	{335545184, "08002"}, // 864 batch_open
+	{335545185, "07003"}, // 865 batch_type
+	{335545186, "07001"}, // 866 batch_param
+	{335545187, "07001"}, // 867 batch_blobs
+	{335545188, "22000"}, // 868 batch_blob_append
+	{335545189, "22000"}, // 869 batch_stream_align
+	{335545190, "22000"}, // 870 batch_rpt_blob
+	{335545191, "22000"}, // 871 batch_blob_buf
+	{335545192, "22000"}, // 872 batch_small_data
+	{335545193, "22000"}, // 873 batch_cont_bpb
+	{335545194, "22000"}, // 874 batch_big_bpb
+	{335545195, "22000"}, // 875 batch_big_segment
+	{335545196, "22000"}, // 876 batch_big_seg2
+	{335545197, "22000"}, // 877 batch_blob_id
+	{335545198, "54000"}, // 878 batch_too_big
+	{335545199, "54000"}, // 879 num_literal
+	{335545200, "XX000"}, // 880 map_event
+	{335545201, "54000"}, // 881 map_overflow
+	{335545202, "54000"}, // 882 hdr_overflow
+	{335545203, "28000"}, // 883 vld_plugins
+	{335545204, "08004"}, // 884 db_crypt_key
 	{335740929, "00000"}, //   1 gfix_db_name
 	{335740930, "00000"}, //   2 gfix_invalid_sw
 	{335740932, "00000"}, //   4 gfix_incmp_sw
@@ -879,6 +970,8 @@ static const struct {
 	{336003109, "07002"}, //  37 dsql_no_input_sqlda
 	{336003110, "07002"}, //  38 dsql_no_output_sqlda
 	{336003111, "07001"}, //  39 dsql_wrong_param_num
+	{336003112, "42000"}, //  40 dsql_invalid_drop_ss_clause
+	{336003113, "42000"}, //  41 upd_ins_cannot_default
 	{336068645, "42000"}, //  37 dyn_filter_not_found
 	{336068649, "42000"}, //  41 dyn_func_not_found
 	{336068656, "42000"}, //  48 dyn_index_not_found
@@ -955,6 +1048,7 @@ static const struct {
 	{336068896, "42000"}, // 288 dyn_cant_use_zero_increment
 	{336068897, "42000"}, // 289 dyn_cant_use_in_foreignkey
 	{336068898, "42000"}, // 290 dyn_defvaldecl_package_func
+	{336068904, "42000"}, // 296 dyn_cant_use_zero_inc_ident
 	{336330753, "00000"}, //   1 gbak_unknown_switch
 	{336330754, "00000"}, //   2 gbak_page_size_missing
 	{336330755, "00000"}, //   3 gbak_page_size_toobig

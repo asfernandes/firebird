@@ -47,7 +47,7 @@
 #include "../jrd/Monitoring.h"
 #include "../jrd/os/pio_proto.h"
 #include "../common/isc_proto.h"
-#include "../common/classes/GetPlugins.h"
+#include "../common/classes/auto.h"
 #include "../common/classes/RefMutex.h"
 #include "../common/classes/ClumpletWriter.h"
 #include "../common/sha.h"
@@ -69,6 +69,17 @@ namespace {
 	const UCHAR CRYPT_INIT = LCK_EX;
 
 	const int MAX_PLUGIN_NAME_LEN = 31;
+
+	template <typename P>
+	class ReleasePlugin
+	{
+	public:
+		static void clear(P* ptr)
+		{
+			if (ptr)
+				PluginManagerInterfacePtr()->releasePlugin(ptr);
+		}
+	};
 }
 
 
@@ -84,6 +95,16 @@ namespace Jrd {
 		void setHeader(void* buf)
 		{
 			header = static_cast<Ods::header_page*>(buf);
+		}
+
+		void setHeader(Ods::header_page* newHdr)
+		{
+			header = newHdr;
+		}
+
+		Ods::header_page* getHeader()
+		{
+			return header;
 		}
 
 	public:
@@ -115,7 +136,8 @@ namespace Jrd {
 		CchHdr(Jrd::thread_db* p_tdbb, USHORT lockType)
 			: window(Jrd::HEADER_PAGE_NUMBER),
 			  tdbb(p_tdbb),
-			  wrtFlag(false)
+			  wrk(NULL),
+			  buffer(*tdbb->getDefaultPool())
 		{
 			void* h = CCH_FETCH(tdbb, &window, lockType, pag_header);
 			if (!h)
@@ -127,12 +149,26 @@ namespace Jrd {
 
 		Ods::header_page* write()
 		{
-			if (!wrtFlag)
+			if (!wrk)
+			{
+				Ods::header_page* hdr = getHeader();
+				wrk = reinterpret_cast<Ods::header_page*>(buffer.getBuffer(hdr->hdr_page_size));
+				memcpy(wrk, hdr, hdr->hdr_page_size);
+
+				// swap headers
+				setHeader(wrk);
+				wrk = hdr;
+			}
+			return getHeader();
+		}
+
+		void flush()
+		{
+			if (wrk)
 			{
 				CCH_MARK_MUST_WRITE(tdbb, &window);
-				wrtFlag = true;
+				memcpy(wrk, getHeader(), wrk->hdr_page_size);
 			}
-			return const_cast<Ods::header_page*>(operator->());
 		}
 
 		void setClumplets(const ClumpletWriter& writer)
@@ -145,7 +181,7 @@ namespace Jrd {
 			const unsigned length = writer.getBufferLength();
 			fb_assert(length <= limit);
 			if (length > limit)
-				(Arg::Gds(isc_random) << "HDR page clumplets overflow").raise();
+				Arg::Gds(isc_hdr_overflow).raise();
 
 			memcpy(to, writer.getBuffer(), length);
 			to[length] = Ods::HDR_end;
@@ -160,7 +196,8 @@ namespace Jrd {
 	private:
 		Jrd::WIN window;
 		Jrd::thread_db* tdbb;
-		bool wrtFlag;
+		Ods::header_page* wrk;
+		Array<UCHAR> buffer;
 	};
 
 	class PhysHdr : public Header
@@ -208,7 +245,7 @@ namespace Jrd {
 				while (!PIO_read(tdbb, file, &bdb, page, status))
 		 		{
 					if (!CCH_rollover_to_shadow(tdbb, dbb, file, false))
- 						ERR_punt();;
+						ERR_punt();
 
 					if (file != pageSpace->file)
 						file = pageSpace->file;
@@ -232,16 +269,20 @@ namespace Jrd {
 		}
 
 	private:
-		AutoPtr<UCHAR, ArrayDelete<UCHAR> > buffer;
+		AutoPtr<UCHAR, ArrayDelete> buffer;
 	};
 
 	CryptoManager::CryptoManager(thread_db* tdbb)
 		: PermanentStorage(*tdbb->getDatabase()->dbb_permanent),
 		  sync(this),
 		  keyName(getPool()),
-		  keyHolderPlugins(getPool()),
+		  keyProviders(getPool()),
+		  keyConsumers(getPool()),
+		  hash(getPool()),
+		  dbInfo(FB_NEW DbInfo(this)),
 		  cryptThreadId(0),
 		  cryptPlugin(NULL),
+		  checkFactory(NULL),
 		  dbb(*tdbb->getDatabase()),
 		  cryptAtt(NULL),
 		  slowIO(0),
@@ -262,6 +303,9 @@ namespace Jrd {
 
 		delete stateLock;
 		delete threadLock;
+		delete checkFactory;
+
+		dbInfo->destroy();
 	}
 
 	void CryptoManager::shutdown(thread_db* tdbb)
@@ -332,24 +376,37 @@ namespace Jrd {
 			else
 				keyName = "";
 
-			loadPlugin(hdr->hdr_crypt_plugin);
+			loadPlugin(tdbb, hdr->hdr_crypt_plugin);
 
 			string valid;
-			calcValidation(valid);
+			calcValidation(valid, cryptPlugin);
 			if (hc.find(Ods::HDR_crypt_hash))
 			{
-				string hash;
 				hc.getString(hash);
 				if (hash != valid)
 					(Arg::Gds(isc_bad_crypt_key) << keyName).raise();
 			}
+			else
+				hash = valid;
 		}
 
 		if (flags & CRYPT_HDR_INIT)
-			checkDigitalSignature(hdr);
+			checkDigitalSignature(tdbb, hdr);
 	}
 
-	void CryptoManager::loadPlugin(const char* pluginName)
+	void CryptoManager::setDbInfo(IDbCryptPlugin* cp)
+	{
+		FbLocalStatus status;
+		cp->setInfo(&status, dbInfo);
+		if (status->getState() & IStatus::STATE_ERRORS)
+		{
+			const ISC_STATUS* v = status->getErrors();
+			if (v[0] == isc_arg_gds && v[1] != isc_arg_end && v[1] != isc_interface_version_too_old)
+				status_exception::raise(&status);
+		}
+	}
+
+	void CryptoManager::loadPlugin(thread_db* tdbb, const char* pluginName)
 	{
 		if (cryptPlugin)
 		{
@@ -362,17 +419,67 @@ namespace Jrd {
 			return;
 		}
 
-		GetPlugins<IDbCryptPlugin> cryptControl(IPluginManager::TYPE_DB_CRYPT, dbb.dbb_config, pluginName);
-		if (!cryptControl.hasData())
+		AutoPtr<Factory> cryptControl(FB_NEW Factory(IPluginManager::TYPE_DB_CRYPT, dbb.dbb_config, pluginName));
+		if (!cryptControl->hasData())
 		{
 			(Arg::Gds(isc_no_crypt_plugin) << pluginName).raise();
 		}
 
 		// do not assign cryptPlugin directly before key init complete
-		IDbCryptPlugin* p = cryptControl.plugin();
-		keyHolderPlugins.init(p, keyName.c_str());
+		IDbCryptPlugin* p = cryptControl->plugin();
+		setDbInfo(p);
+
+		bool fLoad = false, fTry = false;
+		bool holderLess = false;
+		for (GetPlugins<IKeyHolderPlugin> keyControl(IPluginManager::TYPE_KEY_HOLDER, dbb.dbb_config);
+			keyControl.hasData(); keyControl.next())
+		{
+			IKeyHolderPlugin* keyPlugin = keyControl.plugin();
+
+			FbLocalStatus st;
+			int keyCallbackRc = keyPlugin->keyCallback(&st, tdbb->getAttachment()->att_crypt_callback);
+			st.check();
+			if (!keyCallbackRc)
+				continue;
+
+			fTry = true;
+			p->setKey(&st, 1, &keyPlugin, keyName.c_str());
+			if (st.isSuccess())
+			{
+				if (!keyPlugin->useOnlyOwnKeys(&st))
+				{
+					MutexLockGuard g(holdersMutex, FB_FUNCTION);
+					keyProviders.push(tdbb->getAttachment());
+				}
+				fLoad = true;
+				break;
+			}
+		}
+
+		if (!fTry)
+		{
+			FbLocalStatus status;
+			p->setKey(&status, 0, NULL, keyName.c_str());
+			if (status.isSuccess())
+			{
+				holderLess = true;
+				fLoad = true;
+			}
+		}
+
+		if (!fLoad)
+			Arg::Gds(isc_db_crypt_key).raise();
+
 		cryptPlugin = p;
 		cryptPlugin->addRef();
+
+		// remove old factory if present
+		delete checkFactory;
+		checkFactory = NULL;
+
+		// store new one
+		if (dbb.dbb_config->getServerMode() == MODE_SUPER && !holderLess)
+			checkFactory = cryptControl.release();
 	}
 
 	void CryptoManager::prepareChangeCryptState(thread_db* tdbb, const MetaName& plugName,
@@ -428,24 +535,31 @@ namespace Jrd {
 				}
 
 				keyName = key;
-				loadPlugin(plugName.c_str());
+				loadPlugin(tdbb, plugName.c_str());
 			}
 		}
 	}
 
-	void CryptoManager::calcValidation(string& valid)
+	void CryptoManager::calcValidation(string& valid, IDbCryptPlugin* plugin)
 	{
 		// crypt verifier
 		const char* sample = "0123456789ABCDEF";
 		char result[16];
 		FbLocalStatus sv;
-		cryptPlugin->encrypt(&sv, sizeof(result), sample, result);
+		plugin->encrypt(&sv, sizeof(result), sample, result);
 		if (sv->getState() & IStatus::STATE_ERRORS)
 			Arg::StatusVector(&sv).raise();
 
 		// calculate its hash
 		const string verifier(result, sizeof(result));
 		Sha1::hashBased64(valid, verifier);
+	}
+
+	bool CryptoManager::checkValidation(IDbCryptPlugin* plugin)
+	{
+		string valid;
+		calcValidation(valid, plugin);
+		return valid == hash;
 	}
 
 	void CryptoManager::changeCryptState(thread_db* tdbb, const string& plugName)
@@ -498,7 +612,7 @@ namespace Jrd {
 			// Load plugin
 			if (newCryptState)
 			{
-				loadPlugin(plugName.c_str());
+				loadPlugin(tdbb, plugName.c_str());
 			}
 			crypt = newCryptState;
 
@@ -511,14 +625,34 @@ namespace Jrd {
 			{
 				header->hdr_flags |= Ods::hdr_encrypted;
 				plugName.copyTo(header->hdr_crypt_plugin, sizeof(header->hdr_crypt_plugin));
-				string hash;
-				calcValidation(hash);
+				calcValidation(hash, cryptPlugin);
 				hc.deleteWithTag(Ods::HDR_crypt_hash);
 				hc.insertString(Ods::HDR_crypt_hash, hash);
 
 				hc.deleteWithTag(Ods::HDR_crypt_key);
 				if (keyName.hasData())
 					hc.insertString(Ods::HDR_crypt_key, keyName);
+
+				if (checkFactory)
+				{
+					// Create local copy of existing attachments
+					AttVector existing;
+					{
+						SyncLockGuard dsGuard(&dbb.dbb_sync, SYNC_EXCLUSIVE, FB_FUNCTION);
+						for (Attachment* att = dbb.dbb_attachments; att; att = att->att_next)
+							existing.push(att);
+					}
+
+					// Loop through attachments
+					MutexLockGuard g(holdersMutex, FB_FUNCTION);
+
+					for (unsigned n = 0; n < existing.getCount(); ++n)
+						validateAttachment(tdbb, existing[n], true);
+
+					// In case of missing providers close consumers
+					if (keyProviders.getCount() == 0)
+						shutdownConsumers(tdbb);
+				}
 			}
 			else
 				header->hdr_flags &= ~Ods::hdr_encrypted;
@@ -530,7 +664,8 @@ namespace Jrd {
 			header->hdr_flags |= Ods::hdr_crypt_process;
 			process = true;
 
-			digitalySignDatabase(hdr);
+			digitalySignDatabase(tdbb, hdr);
+			hdr.flush();
 		}
 		catch (const Exception&)
 		{
@@ -559,6 +694,16 @@ namespace Jrd {
 		startCryptThread(tdbb);
 	}
 
+	void CryptoManager::shutdownConsumers(thread_db* tdbb)
+	{
+		MutexLockGuard g(holdersMutex, FB_FUNCTION);
+
+		for (unsigned i = 0; i < keyConsumers.getCount(); ++i)
+			keyConsumers[i]->signalShutdown(isc_db_crypt_key);
+
+		keyConsumers.clear();
+	}
+
 	void CryptoManager::blockingAstChangeCryptState()
 	{
 		AsyncContextHolder tdbb(&dbb, FB_FUNCTION);
@@ -575,16 +720,105 @@ namespace Jrd {
 		LCK_convert(tdbb, stateLock, CRYPT_RELEASE, LCK_NO_WAIT);
 	}
 
+	bool CryptoManager::validateAttachment(thread_db* tdbb, Attachment* att, bool consume)
+	{
+		bool fLoad = false, fProvide = false;
+		for (GetPlugins<IKeyHolderPlugin> keyControl(IPluginManager::TYPE_KEY_HOLDER, dbb.dbb_config);
+			keyControl.hasData(); keyControl.next())
+		{
+			// check does keyHolder want to provide a key for us
+			IKeyHolderPlugin* keyHolder = keyControl.plugin();
+
+			FbLocalStatus st;
+			int keyCallbackRc = keyHolder->keyCallback(&st, att->att_crypt_callback);
+			st.check();
+			if (!keyCallbackRc)
+				continue;
+
+			// validate a key
+			AutoPtr<IDbCryptPlugin, ReleasePlugin> crypt(checkFactory->makeInstance());
+			setDbInfo(crypt);
+			crypt->setKey(&st, 1, &keyHolder, keyName.c_str());
+
+			if (st.isSuccess())
+			{
+				try
+				{
+					if (checkValidation(crypt))
+						fLoad = true;
+				}
+				catch (const Exception&)
+				{ }		// Ignore possible errors, continue analysis
+
+				if (fLoad)
+					fProvide = !keyHolder->useOnlyOwnKeys(&st);
+				break;
+			}
+		}
+
+		// Apply results
+
+		if (fProvide)
+			keyProviders.push(att);
+		else if (consume && !fLoad)
+			keyConsumers.push(att);
+
+		return fLoad;
+	}
+
 	void CryptoManager::attach(thread_db* tdbb, Attachment* att)
 	{
-		keyHolderPlugins.attach(att, dbb.dbb_config);
+		if (checkFactory)
+		{
+			MutexLockGuard g(holdersMutex, FB_FUNCTION);
+
+			if (!validateAttachment(tdbb, att, false))
+			{
+				if (keyProviders.getCount() == 0)
+					Arg::Gds(isc_db_crypt_key).raise();
+
+				keyConsumers.push(att);
+			}
+		}
 
 		lockAndReadHeader(tdbb, CRYPT_HDR_INIT);
 	}
 
-	void CryptoManager::terminateCryptThread(thread_db*)
+	void CryptoManager::detach(thread_db* tdbb, Attachment* att)
+	{
+		if (!checkFactory)
+			return;
+
+		MutexLockGuard g(holdersMutex, FB_FUNCTION);
+		for (unsigned n = 0; n < keyConsumers.getCount(); ++n)
+		{
+			if (keyConsumers[n] == att)
+			{
+				keyConsumers.remove(n);
+				return;
+			}
+		}
+
+		for (unsigned n = 0; n < keyProviders.getCount(); ++n)
+		{
+			if (keyProviders[n] == att)
+			{
+				keyProviders.remove(n);
+				if (keyProviders.getCount() == 0)
+					shutdownConsumers(tdbb);
+				return;
+			}
+		}
+	}
+
+	void CryptoManager::terminateCryptThread(thread_db*, bool wait)
 	{
 		down = true;
+		if (wait && cryptThreadId)
+		{
+			Thread::waitForCompletion(cryptThreadId);
+			cryptThreadId = 0;
+		}
 	}
 
 	void CryptoManager::stopThreadUsing(thread_db* tdbb, Attachment* att)
@@ -638,7 +872,7 @@ namespace Jrd {
 			crypt = hdr->hdr_flags & Ods::hdr_encrypted ? true : false;
 
 			// If we are going to start crypt thread, we need plugin to be loaded
-			loadPlugin(hdr->hdr_crypt_plugin);
+			loadPlugin(tdbb, hdr->hdr_crypt_plugin);
 
 			releasingLock = true;
 			LCK_release(tdbb, threadLock);
@@ -715,106 +949,116 @@ namespace Jrd {
 				writer.insertString(isc_dpb_user_name, DBA_USER_NAME);
 				writer.insertByte(isc_dpb_no_db_triggers, TRUE);
 
-				RefPtr<JAttachment> jAtt(REF_NO_INCR, dbb.dbb_provider->attachDatabase(&status_vector,
-					dbb.dbb_filename.c_str(), writer.getBufferLength(), writer.getBuffer()));
-				check(&status_vector);
+				// Avoid races with release_attachment() in jrd.cpp
+				MutexEnsureUnlock releaseGuard(cryptAttMutex, FB_FUNCTION);
+				releaseGuard.enter();
 
-				MutexLockGuard attGuard(*(jAtt->getStable()->getMutex()), FB_FUNCTION);
-				Attachment* att = jAtt->getHandle();
-				if (!att)
-					Arg::Gds(isc_att_shutdown).raise();
-				ThreadContextHolder tdbb(att->att_database, att, &status_vector);
-				tdbb->tdbb_quantum = SWEEP_QUANTUM;
-
-				DatabaseContextHolder dbHolder(tdbb);
-
-				class UseCountHolder
+				if (!down)
 				{
-				public:
-					explicit UseCountHolder(Attachment* a)
-						: att(a)
-					{
-						att->att_use_count++;
-					}
-					~UseCountHolder()
-					{
-						att->att_use_count--;
-					}
-				private:
-					Attachment* att;
-				};
-				UseCountHolder use_count(att);
+					RefPtr<JAttachment> jAtt(REF_NO_INCR, dbb.dbb_provider->attachDatabase(&status_vector,
+						dbb.dbb_database_name.c_str(), writer.getBufferLength(), writer.getBuffer()));
+					check(&status_vector);
 
-				// get ready...
-				AutoSetRestore<Attachment*> attSet(&cryptAtt, att);
-				ULONG lastPage = getLastPage(tdbb);
+					MutexLockGuard attGuard(*(jAtt->getStable()->getMutex()), FB_FUNCTION);
+					Attachment* att = jAtt->getHandle();
+					if (!att)
+						Arg::Gds(isc_att_shutdown).raise();
+					att->att_flags |= ATT_crypt_thread;
+					releaseGuard.leave();
 
-				do
-				{
-					// Check is there some job to do
-					while (currentPage < lastPage)
+					ThreadContextHolder tdbb(att->att_database, att, &status_vector);
+					tdbb->tdbb_quantum = SWEEP_QUANTUM;
+
+					DatabaseContextHolder dbHolder(tdbb);
+
+					class UseCountHolder
 					{
+					public:
+						explicit UseCountHolder(Attachment* a)
+							: att(a)
+						{
+							att->att_use_count++;
+						}
+						~UseCountHolder()
+						{
+							att->att_use_count--;
+						}
+					private:
+						Attachment* att;
+					};
+					UseCountHolder use_count(att);
+
+					// get ready...
+					AutoSetRestore<Attachment*> attSet(&cryptAtt, att);
+					ULONG lastPage = getLastPage(tdbb);
+
+					do
+					{
+						// Check is there some job to do
+						while (currentPage < lastPage)
+						{
+							// forced terminate
+							if (down)
+							{
+								break;
+							}
+
+							// scheduling
+							if (--tdbb->tdbb_quantum < 0)
+							{
+								JRD_reschedule(tdbb, SWEEP_QUANTUM, true);
+							}
+
+							// nbackup state check
+							int bak_state = Ods::hdr_nbak_unknown;
+							{	// scope
+								BackupManager::StateReadGuard stateGuard(tdbb);
+								bak_state = dbb.dbb_backup_manager->getState();
+							}
+
+							if (bak_state != Ods::hdr_nbak_normal)
+							{
+								EngineCheckout checkout(tdbb, FB_FUNCTION);
+								Thread::sleep(10);
+								continue;
+							}
+
+							// writing page to disk will change it's crypt status in usual way
+							WIN window(DB_PAGE_SPACE, currentPage);
+							Ods::pag* page = CCH_FETCH(tdbb, &window, LCK_write, pag_undefined);
+							if (page && page->pag_type <= pag_max &&
+								(bool(page->pag_flags & Ods::crypted_page) != crypt) &&
+								Ods::pag_crypt_page[page->pag_type])
+							{
+								CCH_MARK_MUST_WRITE(tdbb, &window);
+							}
+							CCH_RELEASE_TAIL(tdbb, &window);
+
+							// sometimes save currentPage into DB header
+							++currentPage;
+							if ((currentPage & 0x3FF) == 0)
+							{
+								writeDbHeader(tdbb, currentPage);
+							}
+						}
+
 						// forced terminate
 						if (down)
 						{
 							break;
 						}
 
-						// scheduling
-						if (--tdbb->tdbb_quantum < 0)
-						{
-							JRD_reschedule(tdbb, SWEEP_QUANTUM, true);
-						}
+						// At this moment of time all pages with number < lastpage
+						// are guaranteed to change crypt state. Check for added pages.
+						lastPage = getLastPage(tdbb);
 
-						// nbackup state check
-						int bak_state = Ods::hdr_nbak_unknown;
-						{	// scope
-							BackupManager::StateReadGuard stateGuard(tdbb);
-							bak_state = dbb.dbb_backup_manager->getState();
-						}
+					} while (currentPage < lastPage);
 
-						if (bak_state != Ods::hdr_nbak_normal)
-						{
-							EngineCheckout checkout(tdbb, FB_FUNCTION);
-							Thread::sleep(10);
-							continue;
-						}
-
-						// writing page to disk will change it's crypt status in usual way
-						WIN window(DB_PAGE_SPACE, currentPage);
-						Ods::pag* page = CCH_FETCH(tdbb, &window, LCK_write, pag_undefined);
-						if (page && page->pag_type <= pag_max &&
-							(bool(page->pag_flags & Ods::crypted_page) != crypt) &&
-							Ods::pag_crypt_page[page->pag_type])
-						{
-							CCH_MARK_MUST_WRITE(tdbb, &window);
-						}
-						CCH_RELEASE_TAIL(tdbb, &window);
-
-						// sometimes save currentPage into DB header
-						++currentPage;
-						if ((currentPage & 0x3FF) == 0)
-						{
-							writeDbHeader(tdbb, currentPage);
-						}
-					}
-
-					// forced terminate
-					if (down)
+					// Finalize crypt
+					if (!down)
 					{
-						break;
+						writeDbHeader(tdbb, 0);
 					}
-
-					// At this moment of time all pages with number < lastpage
-					// are guaranteed to change crypt state. Check for added pages.
-					lastPage = getLastPage(tdbb);
-
-				} while (currentPage < lastPage);
-
-				// Finalize crypt
-				if (!down)
-				{
-					writeDbHeader(tdbb, 0);
 				}
 
 				// Release exclusive lock on StartCryptThread
@@ -871,7 +1115,8 @@ namespace Jrd {
 			}
 		}
 
-		digitalySignDatabase(hdr);
+		digitalySignDatabase(tdbb, hdr);
+		hdr.flush();
 	}
 
 	bool CryptoManager::read(thread_db* tdbb, FbStatusVector* sv, Ods::pag* page, IOCallback* io)
@@ -880,10 +1125,10 @@ namespace Jrd {
 		// Therefore use old (status vector based) method
 		try
 		{
+			// Normal case (almost always get here)
+			// Take shared lock on crypto manager and read data
 			if (!slowIO)
 			{
-				// Normal case (almost always get here)
-				// Take shared lock on crypto manager and read data
 				BarSync::IoGuard ioGuard(tdbb, sync);
 				if (!slowIO)
 					return internalRead(tdbb, sv, page, io) == SUCCESS_ALL;
@@ -939,17 +1184,20 @@ namespace Jrd {
 
 		if (page->pag_flags & Ods::crypted_page)
 		{
-			fb_assert(cryptPlugin);
 			if (!cryptPlugin)
 			{
 				Arg::Gds(isc_decrypt_error).copyTo(sv);
 				return FAILED_CRYPT;
 			}
 
-			cryptPlugin->decrypt(sv, dbb.dbb_page_size - sizeof(Ods::pag),
+			FbLocalStatus ls;
+			cryptPlugin->decrypt(&ls, dbb.dbb_page_size - sizeof(Ods::pag),
 				&page[1], &page[1]);
-			if (sv->getState() & IStatus::STATE_ERRORS)
+			if (ls->getState() & IStatus::STATE_ERRORS)
+			{
+				ERR_post_nothrow(&ls, sv);
 				return FAILED_CRYPT;
+			}
 		}
 
 		return SUCCESS_ALL;
@@ -961,10 +1209,18 @@ namespace Jrd {
 		// Therefore use old (status vector based) method
 		try
 		{
+			// Sanity check
+			if (page->pag_type > pag_max)
+				Arg::Gds(isc_page_type_err).raise();
+
+			// Page is never going to be encrypted. No locks needed.
+			if (!Ods::pag_crypt_page[page->pag_type])
+				return internalWrite(tdbb, sv, page, io) == SUCCESS_ALL;
+
+			// Normal case (almost always get here)
+			// Take shared lock on crypto manager and write data
 			if (!slowIO)
 			{
-				// Normal case (almost always get here)
-				// Take shared lock on crypto manager and write data
 				BarSync::IoGuard ioGuard(tdbb, sync);
 				if (!slowIO)
 					return internalWrite(tdbb, sv, page, io) == SUCCESS_ALL;
@@ -1014,7 +1270,7 @@ namespace Jrd {
 		Ods::pag* dest = page;
 		UCHAR savedFlags = page->pag_flags;
 
-		if (crypt && Ods::pag_crypt_page[page->pag_type % (pag_max + 1)])
+		if (crypt && Ods::pag_crypt_page[page->pag_type])
 		{
 			fb_assert(cryptPlugin);
 			if (!cryptPlugin)
@@ -1023,11 +1279,15 @@ namespace Jrd {
 				return FAILED_CRYPT;
 			}
 
+			FbLocalStatus ls;
 			to[0] = page[0];
-			cryptPlugin->encrypt(sv, dbb.dbb_page_size - sizeof(Ods::pag),
+			cryptPlugin->encrypt(&ls, dbb.dbb_page_size - sizeof(Ods::pag),
 				&page[1], &to[1]);
-			if (sv->getState() & IStatus::STATE_ERRORS)
+			if (ls->getState() & IStatus::STATE_ERRORS)
+			{
+				ERR_post_nothrow(&ls, sv);
 				return FAILED_CRYPT;
+			}
 
 			to->pag_flags |= Ods::crypted_page;		// Mark page that is going to be written as encrypted
 			page->pag_flags |= Ods::crypted_page;	// Set the mark for page in cache as well
@@ -1068,115 +1328,9 @@ namespace Jrd {
 		return (crypt ? fb_info_crypt_encrypted : 0) | (process ? fb_info_crypt_process : 0);
 	}
 
-	CryptoManager::HolderAttachments::HolderAttachments(MemoryPool& p)
-		: keyHolder(NULL), attachments(p)
-	{ }
-
-	void CryptoManager::HolderAttachments::setPlugin(IKeyHolderPlugin* kh)
+	const char* CryptoManager::getKeyName() const
 	{
-		keyHolder = kh;
-		keyHolder->addRef();
-	}
-
-	CryptoManager::HolderAttachments::~HolderAttachments()
-	{
-		if (keyHolder)
-		{
-			PluginManagerInterfacePtr()->releasePlugin(keyHolder);
-		}
-	}
-
-	void CryptoManager::HolderAttachments::registerAttachment(Attachment* att)
-	{
-		attachments.add(att);
-	}
-
-	bool CryptoManager::HolderAttachments::unregisterAttachment(Attachment* att)
-	{
-		unsigned i = attachments.getCount();
-		while (i--)
-		{
-			if (attachments[i] == att)
-			{
-				attachments.remove(i);
-				break;
-			}
-		}
-		return attachments.getCount() == 0;
-	}
-
-	bool CryptoManager::HolderAttachments::operator==(IKeyHolderPlugin* kh) const
-	{
-		// ASF: I think there should be a better way to do this.
-		return keyHolder->cloopVTable == kh->cloopVTable;
-	}
-
-	void CryptoManager::KeyHolderPlugins::attach(Attachment* att, Config* config)
-	{
-		MutexLockGuard g(holdersMutex, FB_FUNCTION);
-
-		for (GetPlugins<IKeyHolderPlugin> keyControl(IPluginManager::TYPE_KEY_HOLDER, config);
-			keyControl.hasData(); keyControl.next())
-		{
-			IKeyHolderPlugin* keyPlugin = keyControl.plugin();
-			FbLocalStatus st;
-			if (keyPlugin->keyCallback(&st, att->att_crypt_callback) > 0)
-			{
-				// holder accepted attachment's key
-				HolderAttachments* ha = NULL;
-
-				for (unsigned i = 0; i < knownHolders.getCount(); ++i)
-				{
-					if (knownHolders[i] == keyPlugin)
-					{
-						ha = &knownHolders[i];
-						break;
-					}
-				}
-
-				if (!ha)
-				{
-					ha = &(knownHolders.add());
-					ha->setPlugin(keyPlugin);
-				}
-
-				ha->registerAttachment(att);
-				break;		// Do not need >1 key from attachment to single DB
-			}
-			else
-				st.check();
-		}
-	}
-
-	void CryptoManager::KeyHolderPlugins::detach(Attachment* att)
-	{
-		MutexLockGuard g(holdersMutex, FB_FUNCTION);
-
-		unsigned i = knownHolders.getCount();
-		while (i--)
-		{
-			if (knownHolders[i].unregisterAttachment(att))
-			{
-				knownHolders.remove(i);
-			}
-		}
-	}
-
-	void CryptoManager::KeyHolderPlugins::init(IDbCryptPlugin* crypt, const char* keyName)
-	{
-		MutexLockGuard g(holdersMutex, FB_FUNCTION);
-
-		Firebird::HalfStaticArray<Firebird::IKeyHolderPlugin*, 64> holdersVector;
-		unsigned int length = knownHolders.getCount();
-		IKeyHolderPlugin** vector = holdersVector.getBuffer(length);
-		for (unsigned i = 0; i < length; ++i)
-		{
-			vector[i] = knownHolders[i].getPlugin();
-		}
-
-		FbLocalStatus st;
-		crypt->setKey(&st, length, vector, keyName);
-		st.check();
+		return keyName.c_str();
 	}
 
 	void CryptoManager::addClumplet(string& signature, ClumpletReader& block, UCHAR tag)
@@ -1190,9 +1344,9 @@ namespace Jrd {
 		}
 	}
 
-	void CryptoManager::calcDigitalSignature(string& signature, const Header& hdr)
+	void CryptoManager::calcDigitalSignature(thread_db* tdbb, string& signature, const Header& hdr)
 	{
-	   /*
+		/*
 		We use the following items to calculate digital signature (hash of encrypted string)
 		for database:
 			hdr_flags & (hdr_crypt_process | hdr_encrypted)
@@ -1219,7 +1373,7 @@ namespace Jrd {
 		unsigned len = signature.length();
 		len &= ~(QUANTUM - 1);
 
-		loadPlugin(hdr->hdr_crypt_plugin);
+		loadPlugin(tdbb, hdr->hdr_crypt_plugin);
 
 		string enc;
 		FbLocalStatus sv;
@@ -1231,7 +1385,7 @@ namespace Jrd {
 	}
 
 
-	void CryptoManager::digitalySignDatabase(CchHdr& hdr)
+	void CryptoManager::digitalySignDatabase(thread_db* tdbb, CchHdr& hdr)
 	{
 		ClumpletWriter hc(ClumpletWriter::UnTagged, hdr->hdr_page_size);
 		hdr.getClumplets(hc);
@@ -1243,7 +1397,7 @@ namespace Jrd {
 		{
 			wf = true;
 			string signature;
-			calcDigitalSignature(signature, hdr);
+			calcDigitalSignature(tdbb, signature, hdr);
 			hc.insertString(Ods::HDR_crypt_checksum, signature);
 		}
 
@@ -1251,7 +1405,7 @@ namespace Jrd {
 			hdr.setClumplets(hc);
 	}
 
-	void CryptoManager::checkDigitalSignature(const Header& hdr)
+	void CryptoManager::checkDigitalSignature(thread_db* tdbb, const Header& hdr)
 	{
 		if (hdr->hdr_flags & (Ods::hdr_crypt_process | Ods::hdr_encrypted))
 		{
@@ -1262,10 +1416,17 @@ namespace Jrd {
 
 			string sig1, sig2;
 			hc.getString(sig1);
-			calcDigitalSignature(sig2, hdr);
+			calcDigitalSignature(tdbb, sig2, hdr);
 			if (sig1 != sig2)
 				Arg::Gds(isc_crypt_checksum).raise();
 		}
+	}
+
+	const char* CryptoManager::DbInfo::getDatabaseFullPath(Firebird::CheckStatusWrapper* status)
+	{
+		if (!cryptoManager)
+			return NULL;
+		return cryptoManager->dbb.dbb_filename.c_str();
 	}
 
 } // namespace Jrd

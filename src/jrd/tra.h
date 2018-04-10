@@ -108,9 +108,10 @@ typedef Firebird::BePlusTree<BlobIndex, ULONG, MemoryPool, BlobIndex> BlobIndexT
 
 struct CallerName
 {
-	CallerName(int aType, const Firebird::MetaName& aName)
+	CallerName(int aType, const Firebird::MetaName& aName, const Firebird::MetaName& aUserName)
 		: type(aType),
-		  name(aName)
+		  name(aName),
+		  userName(aUserName)
 	{
 	}
 
@@ -121,7 +122,8 @@ struct CallerName
 
 	CallerName(const CallerName& o)
 		: type(o.type),
-		  name(o.name)
+		  name(o.name),
+		  userName(o.userName)
 	{
 	}
 
@@ -131,11 +133,13 @@ struct CallerName
 		{
 			type = o.type;
 			name = o.name;
+			userName = o.userName;
 		}
 	}
 
 	int type;
 	Firebird::MetaName name;
+	Firebird::MetaName userName;
 };
 
 const int DEFAULT_LOCK_TIMEOUT = -1; // infinite
@@ -237,7 +241,7 @@ public:
 		return tra_attachment->att_dsql_instance;
 	}
 
-	JTransaction* getInterface();
+	JTransaction* getInterface(bool create);
 	void setInterface(JTransaction* jt);
 
 	FB_API_HANDLE tra_public_handle;	// Public handle
@@ -248,13 +252,14 @@ public:
 	TraNumber tra_oldest_active;		// record versions older than this can be
 										// gargage-collected by this tx
 	TraNumber tra_att_oldest_active;	// oldest active transaction in the same attachment
-	jrd_tra*	tra_next;				// next transaction in attachment
+	jrd_tra* tra_next;					// next transaction in attachment
 	MemoryPool* const tra_pool;			// pool for transaction
 	Firebird::MemoryStats	tra_memory_stats;
 	BlobIndexTree tra_blobs_tree;		// list of active blobs
 	BlobIndexTree* tra_blobs;			// pointer to actual list of active blobs
 	ArrayField*	tra_arrays;				// Linked list of active arrays
 	Lock*		tra_lock;				// lock for transaction
+	Lock*		tra_alter_db_lock;		// lock for ALTER DATABASE statement(s)
 	vec<Lock*>*			tra_relation_locks;	// locks for relations
 	TransactionBitmap*	tra_commit_sub_trans;	// committed sub-transactions
 	Savepoint*	tra_save_point;			// list of savepoints
@@ -354,6 +359,10 @@ public:
 		return record;
 	}
 
+	void unlinkFromAttachment();
+	void linkToAttachment(Attachment* attachment);
+	static void tra_abort(const char* reason);
+
 	UserManagement* getUserManagement();
 	SecDbContext* getSecDbContext();
 	SecDbContext* setSecDbContext(Firebird::IAttachment* att, Firebird::ITransaction* tra);
@@ -366,6 +375,7 @@ public:
 	void rollbackToSavepoint(thread_db* tdbb, SavNumber number);
 	void rollforwardSavepoint(thread_db* tdbb);
 	DbCreatorsList* getDbCreatorsList();
+	void checkBlob(thread_db* tdbb, const bid* blob_id);
 
 	GenIdCache* getGenIdCache()
 	{

@@ -238,7 +238,7 @@ void INF_database_info(thread_db* tdbb,
 	const UCHAR* const end_items = items + item_length;
 	const UCHAR* const end = info + output_length;
 
-	const Jrd::Attachment* const err_att = tdbb->getAttachment();
+	const Jrd::Attachment* const att = tdbb->getAttachment();
 
 	while (items < end_items && *items != isc_info_end)
 	{
@@ -633,7 +633,7 @@ void INF_database_info(thread_db* tdbb,
 		case fb_info_tpage_warns:
 		case fb_info_pip_errors:
 		case fb_info_pip_warns:
-			err_val = (err_att->att_validation) ? err_att->att_validation->getInfo(item) : 0;
+			err_val = (att->att_validation) ? att->att_validation->getInfo(item) : 0;
 
 			length = INF_convert(err_val, buffer);
 			break;
@@ -738,8 +738,8 @@ void INF_database_info(thread_db* tdbb,
 
 				win window(PageNumber(DB_PAGE_SPACE, page_num));
 
-				Ods::pag* page = CCH_FETCH(tdbb, &window, LCK_WAIT, pag_undefined);
-				info = INF_put_item(item, dbb->dbb_page_size, reinterpret_cast<UCHAR*>(page), info, end);
+				Ods::pag* page = CCH_FETCH(tdbb, &window, LCK_read, pag_undefined);
+				info = INF_put_item(item, dbb->dbb_page_size, page, info, end);
 				CCH_RELEASE_TAIL(tdbb, &window);
 
 				if (!info)
@@ -769,6 +769,49 @@ void INF_database_info(thread_db* tdbb,
 				dbb->dbb_crypto_manager->getCurrentState() : 0, buffer);
 			break;
 
+		case fb_info_crypt_key:
+			if (tdbb->getAttachment()->locksmith(tdbb, GET_DBCRYPT_KEY_NAME))
+			{
+				const char* key = dbb->dbb_crypto_manager->getKeyName();
+				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(key)), key, info, end)))
+				{
+					if (transaction)
+						TRA_commit(tdbb, transaction, false);
+
+					return;
+				}
+				continue;
+			}
+
+			buffer[0] = item;
+			item = isc_info_error;
+			length = 1 + INF_convert(isc_adm_task_denied, buffer + 1);
+			break;
+
+		case fb_info_conn_flags:
+			length = INF_convert(tdbb->getAttachment()->att_remote_flags, buffer);
+			break;
+
+		case fb_info_statement_timeout_db:
+			length = INF_convert(dbb->dbb_config->getStatementTimeout(), buffer);
+			break;
+
+		case fb_info_statement_timeout_att:
+			length = INF_convert(att->getStatementTimeout(), buffer);
+			break;
+
+		case fb_info_ses_idle_timeout_db:
+			length = INF_convert(dbb->dbb_config->getConnIdleTimeout() * 60, buffer);
+			break;
+
+		case fb_info_ses_idle_timeout_att:
+			length = INF_convert(att->getIdleTimeout(), buffer);
+			break;
+
+		case fb_info_ses_idle_timeout_run:
+			length = INF_convert(att->getActualIdleTimeout(), buffer);
+			break;
+
 		default:
 			buffer[0] = item;
 			item = isc_info_error;
@@ -793,7 +836,7 @@ void INF_database_info(thread_db* tdbb,
 
 UCHAR* INF_put_item(UCHAR item,
 					USHORT length,
-					const UCHAR* string,
+					const void* data,
 					UCHAR* ptr,
 					const UCHAR* end,
 					const bool inserting)
@@ -823,7 +866,7 @@ UCHAR* INF_put_item(UCHAR item,
 
 	if (length)
 	{
-		memmove(ptr, string, length);
+		memmove(ptr, data, length);
 		ptr += length;
 	}
 
@@ -916,7 +959,7 @@ ULONG INF_request_info(const jrd_req* request, const ULONG item_length, const UC
 				{
 					const StmtNode* node = request->req_next;
 
-					if (node->is<SelectNode>())
+					if (nodeIs<SelectNode>(node))
 						state = isc_info_req_select;
 					else
 						state = isc_info_req_receive;

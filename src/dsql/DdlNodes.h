@@ -409,6 +409,7 @@ public:
 	bool privateScope;
 	bool preserveDefaults;
 	SLONG udfReturnPos;
+	Nullable<bool> ssDefiner;
 };
 
 
@@ -542,6 +543,7 @@ public:
 	Firebird::MetaName packageOwner;
 	bool privateScope;
 	bool preserveDefaults;
+	Nullable<bool> ssDefiner;
 };
 
 
@@ -586,6 +588,13 @@ typedef RecreateNode<CreateAlterProcedureNode, DropProcedureNode, isc_dsql_recre
 class TriggerDefinition
 {
 public:
+	enum SqlSecurity
+	{
+		SS_INVOKER,
+		SS_DEFINER,
+		SS_DROP
+	};
+
 	explicit TriggerDefinition(MemoryPool& p)
 		: name(p),
 		  relationName(p),
@@ -626,6 +635,7 @@ public:
 	Firebird::ByteChunk debugData;
 	USHORT systemFlag;
 	bool fkTrigger;
+	Nullable<SqlSecurity> ssDefiner;
 };
 
 
@@ -1130,6 +1140,7 @@ public:
 		Firebird::MetaName relationName;
 		Firebird::MetaName fieldSource;
 		Firebird::MetaName identitySequence;
+		Nullable<IdentityType> identityType;
 		Nullable<USHORT> collationId;
 		Nullable<bool> notNullFlag;	// true = NOT NULL / false = NULL
 		Nullable<USHORT> position;
@@ -1151,7 +1162,7 @@ public:
 		bool descending;
 	};
 
-	struct Constraint : public PermanentStorage
+	struct Constraint
 	{
 		enum Type { TYPE_CHECK, TYPE_NOT_NULL, TYPE_PK, TYPE_UNIQUE, TYPE_FK };
 
@@ -1183,8 +1194,7 @@ public:
 		};
 
 		explicit Constraint(MemoryPool& p)
-			: PermanentStorage(p),
-			  type(TYPE_CHECK),	// Just something to initialize. Do not assume it.
+			: type(TYPE_CHECK),	// Just something to initialize. Do not assume it.
 			  columns(p),
 			  index(NULL),
 			  refRelation(p),
@@ -1207,11 +1217,10 @@ public:
 		Firebird::ObjectsArray<BlrWriter> blrWritersHolder;
 	};
 
-	struct CreateDropConstraint : public PermanentStorage
+	struct CreateDropConstraint
 	{
 		explicit CreateDropConstraint(MemoryPool& p)
-			: PermanentStorage(p),
-			  name(p)
+			: name(p)
 		{
 		}
 
@@ -1219,7 +1228,7 @@ public:
 		Firebird::AutoPtr<Constraint> create;
 	};
 
-	struct Clause : public PermanentStorage
+	struct Clause
 	{
 		enum Type
 		{
@@ -1230,12 +1239,12 @@ public:
 			TYPE_ALTER_COL_POS,
 			TYPE_ALTER_COL_TYPE,
 			TYPE_DROP_COLUMN,
-			TYPE_DROP_CONSTRAINT
+			TYPE_DROP_CONSTRAINT,
+			TYPE_ALTER_SQL_SECURITY
 		};
 
 		explicit Clause(MemoryPool& p, Type aType)
-			: PermanentStorage(p),
-			  type(aType)
+			: type(aType)
 		{
 		}
 
@@ -1293,6 +1302,25 @@ public:
 		NestConst<BoolSourceClause> check;
 	};
 
+	struct IdentityOptions
+	{
+		IdentityOptions(MemoryPool&, IdentityType aType)
+			: type(aType),
+			  restart(false)
+		{
+		}
+
+		IdentityOptions(MemoryPool&)
+			: restart(false)
+		{
+		}
+
+		Nullable<IdentityType> type;
+		Nullable<SINT64> startValue;
+		Nullable<SLONG> increment;
+		bool restart;	// used in ALTER
+	};
+
 	struct AddColumnClause : public Clause
 	{
 		explicit AddColumnClause(MemoryPool& p)
@@ -1302,8 +1330,7 @@ public:
 			  constraints(p),
 			  collate(p),
 			  computed(NULL),
-			  identity(false),
-			  identityStart(0),
+			  identityOptions(NULL),
 			  notNullSpecified(false)
 		{
 		}
@@ -1313,8 +1340,7 @@ public:
 		Firebird::ObjectsArray<AddConstraintClause> constraints;
 		Firebird::MetaName collate;
 		NestConst<ValueSourceClause> computed;
-		bool identity;
-		SINT64 identityStart;
+		NestConst<IdentityOptions> identityOptions;
 		bool notNullSpecified;
 	};
 
@@ -1364,7 +1390,8 @@ public:
 			  field(NULL),
 			  defaultValue(NULL),
 			  dropDefault(false),
-			  identityRestart(false),
+			  dropIdentity(false),
+			  identityOptions(NULL),
 			  computed(NULL)
 		{
 		}
@@ -1372,8 +1399,8 @@ public:
 		dsql_fld* field;
 		NestConst<ValueSourceClause> defaultValue;
 		bool dropDefault;
-		bool identityRestart;
-		Nullable<SINT64> identityRestartValue;
+		bool dropIdentity;
+		NestConst<IdentityOptions> identityOptions;
 		NestConst<ValueSourceClause> computed;
 	};
 
@@ -1399,6 +1426,16 @@ public:
 		}
 
 		Firebird::MetaName name;
+	};
+
+	struct AlterSqlSecurityClause : public Clause
+	{
+		explicit AlterSqlSecurityClause(MemoryPool& p)
+			: Clause(p, TYPE_ALTER_SQL_SECURITY)
+		{
+		}
+
+		Nullable<bool> ssDefiner;
 	};
 
 	RelationNode(MemoryPool& p, RelationSourceNode* aDsqlNode);
@@ -1448,6 +1485,7 @@ public:
 	NestConst<RelationSourceNode> dsqlNode;
 	Firebird::MetaName name;
 	Firebird::Array<NestConst<Clause> > clauses;
+	Nullable<bool> ssDefiner;
 };
 
 
@@ -1478,7 +1516,9 @@ private:
 
 public:
 	const Firebird::string* externalFile;
-	rel_t relationType;
+	Nullable<rel_t> relationType;
+	bool preserveRowsOpt;
+	bool deleteRowsOpt;
 };
 
 
@@ -1899,7 +1939,8 @@ public:
 	}
 
 protected:
-	static USHORT convertPrivilegeFromString(thread_db* tdbb, jrd_tra* transaction, Firebird::MetaName privilege);
+	static USHORT convertPrivilegeFromString(thread_db* tdbb, jrd_tra* transaction,
+		Firebird::MetaName privilege);
 };
 
 class CreateAlterRoleNode : public PrivilegesNode
@@ -2065,12 +2106,11 @@ protected:
 	}
 
 public:
-	class Property : public PermanentStorage
+	class Property
 	{
 	public:
 		explicit Property(MemoryPool& p)
-			: PermanentStorage(p),
-			  value(p)
+			: value(p)
 		{ }
 
 		Firebird::MetaName property;
@@ -2170,13 +2210,15 @@ private:
 	void modifyPrivileges(thread_db* tdbb, jrd_tra* transaction, SSHORT option, const GranteeClause* user);
 	void grantRevoke(thread_db* tdbb, jrd_tra* transaction, const GranteeClause* object,
 		const GranteeClause* userNod, const char* privs, Firebird::MetaName field, int options);
-	static void checkGrantorCanGrant(thread_db* tdbb, jrd_tra* transaction, const char* grantor,
+	static void checkGrantorCanGrantRelation(thread_db* tdbb, jrd_tra* transaction, const char* grantor,
 		const char* privilege, const Firebird::MetaName& relationName,
 		const Firebird::MetaName& fieldName, bool topLevel);
 	static void checkGrantorCanGrantRole(thread_db* tdbb, jrd_tra* transaction,
 			const Firebird::MetaName& grantor, const Firebird::MetaName& roleName);
 	static void checkGrantorCanGrantDdl(thread_db* tdbb, jrd_tra* transaction,
 			const Firebird::MetaName& grantor, const char* privilege, const Firebird::MetaName& objName);
+	static void checkGrantorCanGrantObject(thread_db* tdbb, jrd_tra* transaction, const char* grantor,
+		const char* privilege, const Firebird::MetaName& objName, SSHORT objType);
 	static void storePrivilege(thread_db* tdbb, jrd_tra* transaction,
 		const Firebird::MetaName& object, const Firebird::MetaName& user,
 		const Firebird::MetaName& field, const TEXT* privilege, SSHORT userType,
@@ -2282,6 +2324,7 @@ protected:
 private:
 	static void changeBackupMode(thread_db* tdbb, jrd_tra* transaction, unsigned clause);
 	static void defineDifference(thread_db* tdbb, jrd_tra* transaction, const Firebird::PathName& file);
+	void checkClauses(thread_db* tdbb);
 
 public:
 	bool create;	// Is the node created with a CREATE DATABASE command?
@@ -2293,9 +2336,20 @@ public:
 	Firebird::Array<NestConst<DbFileClause> > files;
 	Firebird::MetaName cryptPlugin;
 	Firebird::MetaName keyName;
+	Nullable<bool> ssDefiner;
 };
 
 
 } // namespace
+
+template <>
+class NullableClear<Jrd::TriggerDefinition::SqlSecurity>	// TriggerDefinition::SqlSecurity especialization for NullableClear
+{
+public:
+	static void clear(Jrd::TriggerDefinition::SqlSecurity& v)
+	{
+		v = Jrd::TriggerDefinition::SS_INVOKER;
+	}
+};
 
 #endif // DSQL_DDL_NODES_H

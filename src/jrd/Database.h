@@ -370,7 +370,6 @@ public:
 
 	Firebird::SyncObject	dbb_sync;
 	Firebird::SyncObject	dbb_sys_attach;		// synchronize operations with dbb_sys_attachments
-	Firebird::SyncObject	dbb_lck_sync;		// synchronize operations with att_long_locks at different attachments
 
 	MemoryPool* dbb_permanent;
 
@@ -399,7 +398,11 @@ public:
 
 	MonitoringData*			dbb_monitoring_data;	// monitoring data
 
+private:
+	Firebird::SyncObject dbb_modules_sync;
 	DatabaseModules	dbb_modules;		// external function/filter modules
+
+public:
 	ExtEngineManager dbb_extManager;	// external engine manager
 
 	Firebird::SyncObject	dbb_flush_count_mutex;
@@ -431,8 +434,8 @@ public:
 	Firebird::SyncObject			dbb_sortbuf_sync;
 	Firebird::Array<UCHAR*>			dbb_sort_buffers;	// sort buffers ready for reuse
 
-	Firebird::SyncObject			dbb_threads_sync;
-	thread_db*						dbb_active_threads;
+	Firebird::Mutex dbb_temp_cache_mutex;
+	FB_UINT64 dbb_temp_cache_size;		// total size of in-memory temp space chunks (see TempSpace class)
 
 	TraNumber dbb_oldest_active;		// Cached "oldest active" transaction
 	TraNumber dbb_oldest_transaction;	// Cached "oldest interesting" transaction
@@ -444,7 +447,7 @@ public:
 	GarbageCollector*	dbb_garbage_collector;	// GarbageCollector class
 	Firebird::Semaphore dbb_gc_sem;		// Event to wake up garbage collector
 	Firebird::Semaphore dbb_gc_init;	// Event for initialization garbage collector
-	Firebird::Semaphore dbb_gc_fini;	// Event for finalization garbage collector
+	ThreadFinishSync<Database*> dbb_gc_fini;	// Sync for finalization garbage collector
 
 	Firebird::MemoryStats dbb_memory_stats;
 	RuntimeStatistics dbb_stats;
@@ -465,7 +468,7 @@ public:
 	BackupManager*	dbb_backup_manager;						// physical backup manager
 	Firebird::TimeStamp dbb_creation_date; 					// creation date
 	ExternalFileDirectoryList* dbb_external_file_directory_list;
-	Firebird::RefPtr<Config> dbb_config;
+	Firebird::RefPtr<const Config> dbb_config;
 
 	SharedCounter dbb_shared_counter;
 	CryptoManager* dbb_crypto_manager;
@@ -474,6 +477,7 @@ public:
 	unsigned dbb_linger_seconds;
 	time_t dbb_linger_end;
 	Firebird::RefPtr<Firebird::IPluginConfig> dbb_plugin_config;
+	Nullable<bool> dbb_ss_definer;	// default sql security value
 
 	// returns true if primary file is located on raw device
 	bool onRawDevice() const;
@@ -500,6 +504,8 @@ public:
 
 	void deletePool(MemoryPool* pool);
 
+	void registerModule(Module&);
+
 private:
 	Database(MemoryPool* p, Firebird::IPluginConfig* pConf, bool shared)
 	:	dbb_permanent(p),
@@ -515,6 +521,7 @@ private:
 		dbb_owner(*p),
 		dbb_pools(*p, 4),
 		dbb_sort_buffers(*p),
+		dbb_gc_fini(*p, garbage_collector, THREAD_medium),
 		dbb_stats(*p),
 		dbb_lock_owner_id(getLockOwnerId()),
 		dbb_tip_cache(NULL),
@@ -563,6 +570,9 @@ public:
 	bool allowSweepRun(thread_db* tdbb);
 	// reset sweep flags and release sweep lock
 	void clearSweepFlags(thread_db* tdbb);
+
+	static void garbage_collector(Database* dbb);
+	void exceptionHandler(const Firebird::Exception& ex, ThreadFinishSync<Database*>::ThreadRoutine* routine);
 
 private:
 	//static int blockingAstSharedCounter(void*);

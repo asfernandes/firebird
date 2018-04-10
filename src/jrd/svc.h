@@ -277,7 +277,7 @@ private:
 	static THREAD_ENTRY_DECLARE run(THREAD_ENTRY_PARAM arg);
 
 private:
-	FbLocalStatus svc_status;						// status vector for running service
+	Firebird::FbLocalStatus svc_status;				// status vector for running service
 	Firebird::string svc_parsed_sw;					// Here point elements of argv
 	ULONG	svc_stdout_head;
 	ULONG	svc_stdout_tail;
@@ -307,7 +307,7 @@ private:
 	bool				svc_utf8;
 	Firebird::string	svc_switches;	// Full set of switches
 	Firebird::string	svc_perm_sw;	// Switches, taken from services table and/or passed using spb_command_line
-	Firebird::string	svc_address_path;
+	Firebird::UCharBuffer	svc_address_path;
 	Firebird::string	svc_command_line;
 
 	Firebird::string	svc_network_protocol;

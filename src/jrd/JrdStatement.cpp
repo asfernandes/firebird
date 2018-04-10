@@ -54,6 +54,7 @@ JrdStatement::JrdStatement(thread_db* tdbb, MemoryPool* p, CompilerScratch* csb)
 	  accessList(*p),
 	  resources(*p),
 	  triggerName(*p),
+	  triggerOwner(*p),
 	  parentStatement(NULL),
 	  subStatements(*p),
 	  fors(*p),
@@ -67,7 +68,7 @@ JrdStatement::JrdStatement(thread_db* tdbb, MemoryPool* p, CompilerScratch* csb)
 		makeSubRoutines(tdbb, this, csb, csb->subProcedures);
 		makeSubRoutines(tdbb, this, csb, csb->subFunctions);
 
-		topNode = (csb->csb_node->kind == DmlNode::KIND_STATEMENT) ?
+		topNode = (csb->csb_node->getKind() == DmlNode::KIND_STATEMENT) ?
 			static_cast<StmtNode*>(csb->csb_node) : NULL;
 
 		accessList = csb->csb_access;
@@ -161,6 +162,9 @@ JrdStatement::JrdStatement(thread_db* tdbb, MemoryPool* p, CompilerScratch* csb)
 			if (!tail->csb_fields && !(tail->csb_flags & csb_update))
 				 rpb->rpb_stream_flags |= RPB_s_no_data;
 
+			if (tail->csb_flags & csb_unstable)
+				rpb->rpb_stream_flags |= RPB_s_unstable;
+
 			rpb->rpb_relation = tail->csb_relation;
 
 			delete tail->csb_fields;
@@ -202,9 +206,9 @@ JrdStatement* JrdStatement::makeStatement(thread_db* tdbb, CompilerScratch* csb,
 
 		DmlNode::doPass1(tdbb, csb, &csb->csb_node);
 
-		// CVC: I'm going to allocate the map before the loop to avoid alloc/dealloc calls.
-		AutoPtr<StreamType, ArrayDelete<StreamType> > localMap(FB_NEW_POOL(*tdbb->getDefaultPool())
-			StreamType[STREAM_MAP_LENGTH]);
+		// CVC: I'm going to preallocate the map before the loop to avoid alloc/dealloc calls.
+		StreamMap localMap;
+		StreamType* const map = localMap.getBuffer(STREAM_MAP_LENGTH);
 
 		// Copy and compile (pass1) domains DEFAULT and constraints.
 		MapFieldInfo::Accessor accessor(&csb->csb_map_field_info);
@@ -212,18 +216,17 @@ JrdStatement* JrdStatement::makeStatement(thread_db* tdbb, CompilerScratch* csb,
 		for (bool found = accessor.getFirst(); found; found = accessor.getNext())
 		{
 			FieldInfo& fieldInfo = accessor.current()->second;
-			//StreamType local_map[MAP_LENGTH];
 
 			AutoSetRestore<USHORT> autoRemapVariable(&csb->csb_remap_variable,
 				(csb->csb_variables ? csb->csb_variables->count() : 0) + 1);
 
-			fieldInfo.defaultValue = NodeCopier::copy(tdbb, csb, fieldInfo.defaultValue, localMap);
+			fieldInfo.defaultValue = NodeCopier::copy(tdbb, csb, fieldInfo.defaultValue, map);
 
 			csb->csb_remap_variable = (csb->csb_variables ? csb->csb_variables->count() : 0) + 1;
 
 			if (fieldInfo.validationExpr)
 			{
-				NodeCopier copier(csb, localMap);
+				NodeCopier copier(csb->csb_pool, csb, map);
 				fieldInfo.validationExpr = copier.copy(tdbb, fieldInfo.validationExpr);
 			}
 
@@ -231,7 +234,7 @@ JrdStatement* JrdStatement::makeStatement(thread_db* tdbb, CompilerScratch* csb,
 			DmlNode::doPass1(tdbb, csb, fieldInfo.validationExpr.getAddress());
 		}
 
-		if (csb->csb_node->kind == DmlNode::KIND_STATEMENT)
+		if (csb->csb_node->getKind() == DmlNode::KIND_STATEMENT)
 			StmtNode::doPass2(tdbb, csb, reinterpret_cast<StmtNode**>(&csb->csb_node), NULL);
 		else
 			ExprNode::doPass2(tdbb, csb, &csb->csb_node);
@@ -406,36 +409,55 @@ void JrdStatement::verifyAccess(thread_db* tdbb)
 		if (item->exa_action == ExternalAccess::exa_procedure)
 		{
 			routine = MET_lookup_procedure_id(tdbb, item->exa_prc_id, false, false, 0);
+			if (!routine)
+			{
+				string name;
+				name.printf("id %d", item->exa_prc_id);
+				ERR_post(Arg::Gds(isc_prcnotdef) << name);
+			}
 			aclType = id_procedure;
 		}
 		else if (item->exa_action == ExternalAccess::exa_function)
 		{
 			routine = Function::lookup(tdbb, item->exa_fun_id, false, false, 0);
+
+			if (!routine)
+			{
+				string name;
+				name.printf("id %d", item->exa_fun_id);
+				ERR_post(Arg::Gds(isc_funnotdef) << name);
+			}
+
 			aclType = id_function;
 		}
 		else
 		{
 			jrd_rel* relation = MET_lookup_relation_id(tdbb, item->exa_rel_id, false);
-			jrd_rel* view = NULL;
-			if (item->exa_view_id)
-				view = MET_lookup_relation_id(tdbb, item->exa_view_id, false);
 
 			if (!relation)
 				continue;
 
+			MetaName userName;
+			if (item->exa_view_id)
+			{
+				jrd_rel* view = MET_lookup_relation_id(tdbb, item->exa_view_id, false);
+				if (view && (view->rel_flags & REL_sql_relation))
+					userName = view->rel_owner_name;
+			}
+
 			switch (item->exa_action)
 			{
 				case ExternalAccess::exa_insert:
-					verifyTriggerAccess(tdbb, relation, relation->rel_pre_store, view);
-					verifyTriggerAccess(tdbb, relation, relation->rel_post_store, view);
+					verifyTriggerAccess(tdbb, relation, relation->rel_pre_store, userName);
+					verifyTriggerAccess(tdbb, relation, relation->rel_post_store, userName);
 					break;
 				case ExternalAccess::exa_update:
-					verifyTriggerAccess(tdbb, relation, relation->rel_pre_modify, view);
-					verifyTriggerAccess(tdbb, relation, relation->rel_post_modify, view);
+					verifyTriggerAccess(tdbb, relation, relation->rel_pre_modify, userName);
+					verifyTriggerAccess(tdbb, relation, relation->rel_post_modify, userName);
 					break;
 				case ExternalAccess::exa_delete:
-					verifyTriggerAccess(tdbb, relation, relation->rel_pre_erase, view);
-					verifyTriggerAccess(tdbb, relation, relation->rel_post_erase, view);
+					verifyTriggerAccess(tdbb, relation, relation->rel_pre_erase, userName);
+					verifyTriggerAccess(tdbb, relation, relation->rel_post_erase, userName);
 					break;
 				default:
 					fb_assert(false);
@@ -454,17 +476,28 @@ void JrdStatement::verifyAccess(thread_db* tdbb)
 		{
 			const SecurityClass* sec_class = SCL_get_class(tdbb, access->acc_security_name.c_str());
 
+			MetaName userName;
+
+			if (access->acc_ss_rel_id)
+			{
+				const jrd_rel* view = MET_lookup_relation_id(tdbb, access->acc_ss_rel_id, false);
+				if (view && (view->rel_flags & REL_sql_relation))
+					userName = view->rel_owner_name;
+			}
+
+			if (userName.isEmpty() && routine->ssDefiner.specified && routine->ssDefiner.value && routine->owner.hasData())
+				userName = routine->owner;
+
 			if (routine->getName().package.isEmpty())
 			{
-				SCL_check_access(tdbb, sec_class, access->acc_view_id, aclType,
+				SCL_check_access(tdbb, sec_class, userName, aclType,
 					routine->getName().identifier, access->acc_mask, access->acc_type,
 					true, access->acc_name, access->acc_r_name);
 			}
 			else
 			{
-				SCL_check_access(tdbb, sec_class, access->acc_view_id,
-					id_package, routine->getName().package,
-					access->acc_mask, access->acc_type,
+				SCL_check_access(tdbb, sec_class, userName, id_package,
+					routine->getName().package, access->acc_mask, access->acc_type,
 					true, access->acc_name, access->acc_r_name);
 			}
 		}
@@ -484,6 +517,8 @@ void JrdStatement::verifyAccess(thread_db* tdbb)
 
 		MetaName objName;
 		SLONG objType = 0;
+
+		MetaName userName;
 
 		if (useCallerPrivs)
 		{
@@ -509,9 +544,18 @@ void JrdStatement::verifyAccess(thread_db* tdbb)
 			}
 
 			objName = transaction->tra_caller_name.name;
+			userName = transaction->tra_caller_name.userName;
 		}
 
-		SCL_check_access(tdbb, sec_class, access->acc_view_id, objType, objName,
+
+		if (access->acc_ss_rel_id)
+		{
+			const jrd_rel* view = MET_lookup_relation_id(tdbb, access->acc_ss_rel_id, false);
+			if (view && (view->rel_flags & REL_sql_relation))
+				userName = view->rel_owner_name;
+		}
+
+		SCL_check_access(tdbb, sec_class, userName, objType, objName,
 			access->acc_mask, access->acc_type, true, access->acc_name, access->acc_r_name);
 	}
 }
@@ -588,7 +632,7 @@ void JrdStatement::release(thread_db* tdbb)
 
 // Check that we have enough rights to access all resources this list of triggers touches.
 void JrdStatement::verifyTriggerAccess(thread_db* tdbb, jrd_rel* ownerRelation,
-	trig_vec* triggers, jrd_rel* view)
+	TrigVector* triggers, MetaName userName)
 {
 	if (!triggers)
 		return;
@@ -629,10 +673,18 @@ void JrdStatement::verifyTriggerAccess(thread_db* tdbb, jrd_rel* ownerRelation,
 			}
 
 			// a direct access to an object from this trigger
+			if (access->acc_ss_rel_id)
+			{
+				const jrd_rel* view = MET_lookup_relation_id(tdbb, access->acc_ss_rel_id, false);
+				if (view && (view->rel_flags & REL_sql_relation))
+					userName = view->rel_owner_name;
+			}
+			else if (t.ssDefiner.specified && t.ssDefiner.value)
+				userName = t.owner;
+
 			const SecurityClass* sec_class = SCL_get_class(tdbb, access->acc_security_name.c_str());
-			SCL_check_access(tdbb, sec_class,
-				(access->acc_view_id) ? access->acc_view_id : (view ? view->rel_id : 0),
-				id_trigger, t.statement->triggerName, access->acc_mask,
+			SCL_check_access(tdbb, sec_class, userName, id_trigger,
+				t.statement->triggerName, access->acc_mask,
 				access->acc_type, true, access->acc_name, access->acc_r_name);
 		}
 	}
@@ -640,7 +692,7 @@ void JrdStatement::verifyTriggerAccess(thread_db* tdbb, jrd_rel* ownerRelation,
 
 // Invoke buildExternalAccess for triggers in vector
 inline void JrdStatement::triggersExternalAccess(thread_db* tdbb, ExternalAccessList& list,
-	trig_vec* tvec)
+	TrigVector* tvec)
 {
 	if (!tvec)
 		return;
@@ -687,7 +739,7 @@ void JrdStatement::buildExternalAccess(thread_db* tdbb, ExternalAccessList& list
 			if (!relation)
 				continue;
 
-			trig_vec *vec1, *vec2;
+			RefPtr<TrigVector> vec1, vec2;
 
 			switch (item->exa_action)
 			{
@@ -726,7 +778,7 @@ template <typename T> static void makeSubRoutines(thread_db* tdbb, JrdStatement*
 		Routine* subRoutine = subNode->routine;
 		CompilerScratch*& subCsb = subNode->subCsb;
 
-		JrdStatement* subStatement = JrdStatement::makeStatement(tdbb, subCsb, true);
+		JrdStatement* subStatement = JrdStatement::makeStatement(tdbb, subCsb, false);
 		subStatement->parentStatement = statement;
 		subRoutine->setStatement(subStatement);
 

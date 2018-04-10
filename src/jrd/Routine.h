@@ -28,6 +28,7 @@
 #include "../common/classes/QualifiedName.h"
 #include "../common/classes/NestConst.h"
 #include "../common/MsgMetadata.h"
+#include "../common/classes/Nullable.h"
 
 namespace Jrd
 {
@@ -82,7 +83,7 @@ namespace Jrd
 		static const USHORT MAX_ALTER_COUNT = 64;	// Number of times an in-cache routine can be altered
 
 		static Firebird::MsgMetadata* createMetadata(
-			const Firebird::Array<NestConst<Parameter> >& parameters);
+			const Firebird::Array<NestConst<Parameter> >& parameters, bool isExtern);
 		static Format* createFormat(MemoryPool& pool, Firebird::IMessageMetadata* params, bool addEof);
 
 	public:
@@ -177,6 +178,9 @@ namespace Jrd
 								// (it will usually be 0)
 		USHORT alterCount;		// No. of times the routine was altered
 		Lock* existenceLock;	// existence lock, if any
+
+		Nullable<bool> ssDefiner;	// true ? SQL DEFINER : SQL INVOKER
+		Firebird::MetaName owner;
 	};
 }
 

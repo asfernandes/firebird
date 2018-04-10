@@ -86,10 +86,11 @@ class MessageNode;
 class PlanNode;
 class RecordSource;
 
+// Direction for each column in sort order
+enum SortDirection { ORDER_ANY, ORDER_ASC, ORDER_DESC };
+
 // Types of nulls placement for each column in sort order
-const int rse_nulls_default	= 0;
-const int rse_nulls_first	= 1;
-const int rse_nulls_last	= 2;
+enum NullsPlacement { NULLS_DEFAULT, NULLS_FIRST, NULLS_LAST };
 
 
 // Aggregate Sort Block (for DISTINCT aggregates)
@@ -188,7 +189,7 @@ typedef Firebird::SortedArray<Resource, Firebird::EmptyStorage<Resource>,
 struct AccessItem
 {
 	Firebird::MetaName		acc_security_name;
-	SLONG					acc_view_id;
+	SLONG					acc_ss_rel_id;	// Relation Id which owner will be used to check permissions
 	Firebird::MetaName		acc_name, acc_r_name;
 	SLONG					acc_type;
 	SecurityClass::flags_t	acc_mask;
@@ -209,8 +210,8 @@ struct AccessItem
 		if ((v = i1.acc_security_name.compare(i2.acc_security_name)) != 0)
 			return v > 0;
 
-		if (i1.acc_view_id != i2.acc_view_id)
-			return i1.acc_view_id > i2.acc_view_id;
+		if (i1.acc_ss_rel_id != i2.acc_ss_rel_id)
+			return i1.acc_ss_rel_id > i2.acc_ss_rel_id;
 
 		if (i1.acc_mask != i2.acc_mask)
 			return i1.acc_mask > i2.acc_mask;
@@ -227,7 +228,7 @@ struct AccessItem
 	AccessItem(const Firebird::MetaName& security_name, SLONG view_id,
 		const Firebird::MetaName& name, SLONG type,
 		SecurityClass::flags_t mask, const Firebird::MetaName& relName)
-		: acc_security_name(security_name), acc_view_id(view_id), acc_name(name),
+		: acc_security_name(security_name), acc_ss_rel_id(view_id), acc_name(name),
 			acc_r_name(relName), acc_type(type), acc_mask(mask)
 	{}
 };
@@ -403,40 +404,6 @@ typedef Firebird::GenericMap<Firebird::Pair<Firebird::Right<Item, ItemInfo> > > 
 
 class CompilerScratch : public pool_alloc<type_csb>
 {
-	CompilerScratch(MemoryPool& p, FB_SIZE_T len, const Firebird::MetaName& domain_validation)
-	:	/*csb_node(0),
-		csb_variables(0),
-		csb_dependencies(0),
-		csb_count(0),
-		csb_n_stream(0),
-		csb_msg_number(0),
-		csb_impure(0),
-		csb_g_flags(0),*/
-#ifdef CMP_DEBUG
-		csb_dump(p),
-#endif
-		csb_external(p),
-		csb_access(p),
-		csb_resources(p),
-		csb_dependencies(p),
-		csb_fors(p),
-		csb_cursors(p),
-		csb_invariants(p),
-		csb_current_nodes(p),
-		csb_pool(p),
-		csb_map_field_info(p),
-		csb_map_item_info(p),
-		csb_message_pad(p),
-		csb_domain_validation(domain_validation),
-		subFunctions(p),
-		subProcedures(p),
-		csb_currentForNode(NULL),
-		csb_currentDMLNode(NULL),
-		csb_rpt(p, len)
-	{
-		csb_dbg_info = FB_NEW_POOL(p) Firebird::DbgInfo(p);
-	}
-
 public:
 	struct Dependency
 	{
@@ -461,19 +428,55 @@ public:
 		SLONG subNumber;
 	};
 
-	static CompilerScratch* newCsb(MemoryPool& p, FB_SIZE_T len,
-								   const Firebird::MetaName& domain_validation = Firebird::MetaName())
+	explicit CompilerScratch(MemoryPool& p, CompilerScratch* aMainCsb = NULL)
+	:	/*csb_node(0),
+		csb_variables(0),
+		csb_dependencies(0),
+		csb_count(0),
+		csb_n_stream(0),
+		csb_msg_number(0),
+		csb_impure(0),
+		csb_g_flags(0),*/
+#ifdef CMP_DEBUG
+		csb_dump(p),
+#endif
+		mainCsb(aMainCsb),
+		csb_external(p),
+		csb_access(p),
+		csb_resources(p),
+		csb_dependencies(p),
+		csb_fors(p),
+		csb_cursors(p),
+		csb_invariants(p),
+		csb_current_nodes(p),
+		csb_computing_fields(p),
+		csb_pool(p),
+		csb_map_field_info(p),
+		csb_map_item_info(p),
+		csb_message_pad(p),
+		subFunctions(p),
+		subProcedures(p),
+		csb_currentForNode(NULL),
+		csb_currentDMLNode(NULL),
+		csb_rpt(p)
 	{
-		return FB_NEW_POOL(p) CompilerScratch(p, len, domain_validation);
+		csb_dbg_info = FB_NEW_POOL(p) Firebird::DbgInfo(p);
 	}
 
 	StreamType nextStream(bool check = true)
 	{
 		if (csb_n_stream >= MAX_STREAMS && check)
-		{
 			ERR_post(Firebird::Arg::Gds(isc_too_many_contexts));
-		}
+
 		return csb_n_stream++;
+	}
+
+	void inheritViewFlags(StreamType stream, USHORT flags)
+	{
+		if (csb_view)
+		{
+			csb_rpt[stream].csb_flags |= csb_rpt[csb_view_stream].csb_flags & flags;
+		}
 	}
 
 #ifdef CMP_DEBUG
@@ -493,6 +496,7 @@ public:
 	Firebird::string csb_dump;
 #endif
 
+	CompilerScratch* mainCsb;
 	Firebird::BlrReader	csb_blr_reader;
 	DmlNode*		csb_node;
 	ExternalAccessList csb_external;			// Access to outside procedures/triggers to be checked
@@ -505,6 +509,7 @@ public:
 	Firebird::Array<ULONG*> csb_invariants;		// stack of pointer to nodes invariant offsets
 	Firebird::Array<ExprNode*> csb_current_nodes;	// RseNode's and other invariant
 												// candidates within whose scope we are
+	Firebird::SortedArray<jrd_fld*> csb_computing_fields;	// Computed fields being compiled
 	StreamType		csb_n_stream;				// Next available stream
 	USHORT			csb_msg_number;				// Highest used message number
 	ULONG			csb_impure;					// Next offset into impure area
@@ -522,6 +527,7 @@ public:
 	// used in cmp.cpp/pass1
 	jrd_rel*	csb_view;
 	StreamType	csb_view_stream;
+	jrd_rel*	csb_parent_relation;
 	unsigned	blrVersion;
 	USHORT		csb_remap_variable;
 	bool		csb_validate_expr;
@@ -613,6 +619,7 @@ const int csb_sub_stream	= 128;		// a sub-stream of the RSE being processed
 const int csb_erase			= 256;		// we are processing an erase
 const int csb_unmatched		= 512;		// stream has conjuncts unmatched by any index
 const int csb_update		= 1024;		// erase or modify for relation
+const int csb_unstable		= 2048;		// unstable explicit cursor
 
 inline void CompilerScratch::csb_repeat::activate()
 {
@@ -627,7 +634,7 @@ inline void CompilerScratch::csb_repeat::deactivate()
 
 class StatusXcp
 {
-	FbLocalStatus status;
+	Firebird::FbLocalStatus status;
 
 public:
 	StatusXcp();
@@ -639,6 +646,8 @@ public:
 	SLONG as_gdscode() const;
 	SLONG as_sqlcode() const;
 	void as_sqlstate(char*) const;
+	SLONG as_xcpcode() const;
+	Firebird::string as_text() const;
 };
 
 // must correspond to the declared size of RDB$EXCEPTIONS.RDB$MESSAGE

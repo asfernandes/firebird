@@ -31,6 +31,8 @@
 
 #include <stdio.h>
 #include "../jrd/ibase.h"
+#include "firebird/Interface.h"
+#include "firebird/Message.h"
 #include "../common/dsc.h"
 #include "../burp/misc_proto.h"
 #include "../yvalve/gds_proto.h"
@@ -40,6 +42,8 @@
 #include "../common/classes/fb_pair.h"
 #include "../common/classes/MetaName.h"
 #include "../../jrd/SimilarToMatcher.h"
+#include "../common/status.h"
+#include "../common/classes/ImplementHelper.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -197,9 +201,12 @@ Version 9: FB2.5.
 
 Version 10: FB3.0.
 			See backup_capabilities in OdsDetection.h.
+
+Version 11: FB4.0.
+			SQL SECURITY feature.
 */
 
-const int ATT_BACKUP_FORMAT		= 10;
+const int ATT_BACKUP_FORMAT		= 11;
 
 // format version number for ranges for arrays
 
@@ -246,6 +253,7 @@ enum att_type {
 	att_SQL_dialect,		// SQL dialect that it speaks
 	att_db_read_only,		// Is the database ReadOnly?
 	att_database_linger,	// Disconnection timeout
+	att_database_sql_security,// default sql security value
 
 	// Relation attributes
 
@@ -267,6 +275,7 @@ enum att_type {
 	att_relation_flags,
 	att_relation_ext_file_name, // name of file for external tables
 	att_relation_type,
+	att_relation_sql_security,
 
 	// Field attributes (used for both global and local fields)
 
@@ -400,6 +409,7 @@ enum att_type {
 	att_trig_engine_name,
 	att_trig_entrypoint,
 	att_trig_type2,
+	att_trig_sql_security,
 
 	// Function attributes
 
@@ -423,6 +433,7 @@ enum att_type {
 	att_function_owner_name,
 	att_function_legacy_flag,
 	att_function_deterministic_flag,
+	att_function_sql_security,
 
 	// Function argument attributes
 
@@ -518,6 +529,7 @@ enum att_type {
 	att_procedure_entrypoint,
 	att_procedure_package_name,
 	att_procedure_private_flag,
+	att_procedure_sql_security,
 
 	// Stored procedure parameter attributes
 
@@ -617,7 +629,8 @@ enum att_type {
 	att_package_valid_body_flag,
 	att_package_security_class,
 	att_package_owner_name,
-	att_package_description
+	att_package_description,
+	att_package_sql_security
 };
 
 
@@ -651,12 +664,14 @@ struct burp_fld
 	SSHORT		fld_type;
 	SSHORT		fld_sub_type;
 	FLD_LENGTH	fld_length;
+	FLD_LENGTH	fld_total_len;	// including additional 2 bytes for VARYING CHAR
 	SSHORT		fld_scale;
 	SSHORT		fld_position;
 	SSHORT		fld_parameter;
 	SSHORT		fld_missing_parameter;
 	SSHORT		fld_id;
 	RCRD_OFFSET	fld_offset;
+	RCRD_OFFSET	fld_missing_offset;
 	RCRD_OFFSET	fld_old_offset;
 	SSHORT		fld_number;
 	SSHORT		fld_system_flag;
@@ -685,6 +700,8 @@ struct burp_fld
 	ISC_QUAD	fld_default_source;
 	SSHORT		fld_character_set_id;
 	SSHORT		fld_collation_id;
+	RCRD_OFFSET	fld_sql;
+	RCRD_OFFSET	fld_null;
 };
 
 enum fld_flags_vals {
@@ -769,8 +786,6 @@ struct burp_meta_obj
 // CVC: Could use MAXPATHLEN, but what about restoring in a different system?
 // I need to review if we tolerate different lengths for different OS's here.
 const unsigned int MAX_FILE_NAME_SIZE		= 256;
-
-//#include "../jrd/svc.h"
 
 #include "../burp/std_desc.h"
 
@@ -921,7 +936,6 @@ public:
 		// this is VERY dirty hack to keep current behaviour
 		memset (&gbl_database_file_name, 0,
 			&veryEnd - reinterpret_cast<char*>(&gbl_database_file_name));
-		memset(status_vector, 0, sizeof(status_vector));
 
 		gbl_stat_flags = 0;
 		gbl_stat_header = false;
@@ -948,6 +962,7 @@ public:
 	bool		gbl_sw_deactivate_indexes;
 	bool		gbl_sw_kill;
 	USHORT		gbl_sw_blk_factor;
+	USHORT		gbl_dialect;
 	const SCHAR*	gbl_sw_fix_fss_data;
 	USHORT			gbl_sw_fix_fss_data_id;
 	const SCHAR*	gbl_sw_fix_fss_metadata;
@@ -966,6 +981,7 @@ public:
 	burp_fil*	gbl_sw_files;
 	burp_fil*	gbl_sw_backup_files;
 	gfld*		gbl_global_fields;
+	unsigned	gbl_network_protocol;
 	burp_act*	action;
 	ULONG		io_buffer_size;
 	redirect_vals	sw_redirect;
@@ -994,11 +1010,10 @@ public:
 	SCHAR		mvol_old_file [MAX_FILE_NAME_SIZE];
 	int			mvol_volume_count;
 	bool		mvol_empty_file;
-	isc_db_handle	db_handle;
-	isc_tr_handle	tr_handle;
-	isc_tr_handle	global_trans;
+	Firebird::IAttachment*	db_handle;
+	Firebird::ITransaction*	tr_handle;
+	Firebird::ITransaction*	global_trans;
 	DESC		file_desc;
-	ISC_STATUS_ARRAY status_vector;
 	int			exit_code;
 	UCHAR*		head_of_mem_list;
 	FILE*		output_file;
@@ -1008,59 +1023,61 @@ public:
 	// burp_fld*	v3_cvt_fld_list;
 
 	// The handles_get... are for restore.
-	isc_req_handle	handles_get_character_sets_req_handle1;
-	isc_req_handle	handles_get_chk_constraint_req_handle1;
-	isc_req_handle	handles_get_collation_req_handle1;
-	isc_req_handle	handles_get_exception_req_handle1;
-	isc_req_handle	handles_get_field_dimensions_req_handle1;
-	isc_req_handle	handles_get_field_req_handle1;
-	isc_req_handle	handles_get_fields_req_handle1;
-	isc_req_handle	handles_get_fields_req_handle2;
-	isc_req_handle	handles_get_fields_req_handle3;
-	isc_req_handle	handles_get_fields_req_handle4;
-	isc_req_handle	handles_get_fields_req_handle5;
-	isc_req_handle	handles_get_fields_req_handle6;
-	isc_req_handle	handles_get_files_req_handle1;
-	isc_req_handle	handles_get_filter_req_handle1;
-	isc_req_handle	handles_get_function_arg_req_handle1;
-	isc_req_handle	handles_get_function_req_handle1;
-	isc_req_handle	handles_get_global_field_req_handle1;
-	isc_req_handle	handles_get_index_req_handle1;
-	isc_req_handle	handles_get_index_req_handle2;
-	isc_req_handle	handles_get_index_req_handle3;
-	isc_req_handle	handles_get_index_req_handle4;
-	isc_req_handle	handles_get_package_req_handle1;
-	isc_req_handle	handles_get_procedure_prm_req_handle1;
-	isc_req_handle	handles_get_procedure_req_handle1;
-	isc_req_handle	handles_get_ranges_req_handle1;
-	isc_req_handle	handles_get_ref_constraint_req_handle1;
-	isc_req_handle	handles_get_rel_constraint_req_handle1;
-	isc_req_handle	handles_get_relation_req_handle1;
-	isc_req_handle	handles_get_security_class_req_handle1;
-	isc_req_handle	handles_get_sql_roles_req_handle1;
-	isc_req_handle	handles_get_mapping_req_handle1;
-	isc_req_handle	handles_get_trigger_message_req_handle1;
-	isc_req_handle	handles_get_trigger_message_req_handle2;
-	isc_req_handle	handles_get_trigger_old_req_handle1;
-	isc_req_handle	handles_get_trigger_req_handle1;
-	isc_req_handle	handles_get_type_req_handle1;
-	isc_req_handle	handles_get_user_privilege_req_handle1;
-	isc_req_handle	handles_get_view_req_handle1;
+	Firebird::IRequest*	handles_get_character_sets_req_handle1;
+	Firebird::IRequest*	handles_get_chk_constraint_req_handle1;
+	Firebird::IRequest*	handles_get_collation_req_handle1;
+	Firebird::IRequest*	handles_get_exception_req_handle1;
+	Firebird::IRequest*	handles_get_field_dimensions_req_handle1;
+	Firebird::IRequest*	handles_get_field_req_handle1;
+	Firebird::IRequest*	handles_get_fields_req_handle1;
+	Firebird::IRequest*	handles_get_fields_req_handle2;
+	Firebird::IRequest*	handles_get_fields_req_handle3;
+	Firebird::IRequest*	handles_get_fields_req_handle4;
+	Firebird::IRequest*	handles_get_fields_req_handle5;
+	Firebird::IRequest*	handles_get_fields_req_handle6;
+	Firebird::IRequest*	handles_get_files_req_handle1;
+	Firebird::IRequest*	handles_get_filter_req_handle1;
+	Firebird::IRequest*	handles_get_function_arg_req_handle1;
+	Firebird::IRequest*	handles_get_function_req_handle1;
+	Firebird::IRequest*	handles_get_global_field_req_handle1;
+	Firebird::IRequest*	handles_get_index_req_handle1;
+	Firebird::IRequest*	handles_get_index_req_handle2;
+	Firebird::IRequest*	handles_get_index_req_handle3;
+	Firebird::IRequest*	handles_get_index_req_handle4;
+	Firebird::IRequest*	handles_get_package_req_handle1;
+	Firebird::IRequest*	handles_get_procedure_prm_req_handle1;
+	Firebird::IRequest*	handles_get_procedure_req_handle1;
+	Firebird::IRequest*	handles_get_ranges_req_handle1;
+	Firebird::IRequest*	handles_get_ref_constraint_req_handle1;
+	Firebird::IRequest*	handles_get_rel_constraint_req_handle1;
+	Firebird::IRequest*	handles_get_relation_req_handle1;
+	Firebird::IRequest*	handles_get_security_class_req_handle1;
+	Firebird::IRequest*	handles_get_sql_roles_req_handle1;
+	Firebird::IRequest*	handles_get_mapping_req_handle1;
+	Firebird::IRequest*	handles_get_trigger_message_req_handle1;
+	Firebird::IRequest*	handles_get_trigger_message_req_handle2;
+	Firebird::IRequest*	handles_get_trigger_old_req_handle1;
+	Firebird::IRequest*	handles_get_trigger_req_handle1;
+	Firebird::IRequest*	handles_get_type_req_handle1;
+	Firebird::IRequest*	handles_get_user_privilege_req_handle1;
+	Firebird::IRequest*	handles_get_view_req_handle1;
+
 	// The handles_put.. are for backup.
-	isc_req_handle	handles_put_index_req_handle1;
-	isc_req_handle	handles_put_index_req_handle2;
-	isc_req_handle	handles_put_index_req_handle3;
-	isc_req_handle	handles_put_index_req_handle4;
-	isc_req_handle	handles_put_index_req_handle5;
-	isc_req_handle	handles_put_index_req_handle6;
-	isc_req_handle	handles_put_index_req_handle7;
-	isc_req_handle	handles_put_relation_req_handle1;
-	isc_req_handle	handles_put_relation_req_handle2;
-	isc_req_handle	handles_store_blr_gen_id_req_handle1;
-	isc_req_handle	handles_write_function_args_req_handle1;
-	isc_req_handle	handles_write_function_args_req_handle2;
-	isc_req_handle	handles_write_procedure_prms_req_handle1;
-	isc_req_handle	handles_fix_security_class_name_req_handle1;
+	Firebird::IRequest*	handles_put_index_req_handle1;
+	Firebird::IRequest*	handles_put_index_req_handle2;
+	Firebird::IRequest*	handles_put_index_req_handle3;
+	Firebird::IRequest*	handles_put_index_req_handle4;
+	Firebird::IRequest*	handles_put_index_req_handle5;
+	Firebird::IRequest*	handles_put_index_req_handle6;
+	Firebird::IRequest*	handles_put_index_req_handle7;
+	Firebird::IRequest*	handles_put_relation_req_handle1;
+	Firebird::IRequest*	handles_put_relation_req_handle2;
+	Firebird::IRequest*	handles_store_blr_gen_id_req_handle1;
+	Firebird::IRequest*	handles_write_function_args_req_handle1;
+	Firebird::IRequest*	handles_write_function_args_req_handle2;
+	Firebird::IRequest*	handles_write_procedure_prms_req_handle1;
+	Firebird::IRequest*	handles_fix_security_class_name_req_handle1;
+
 	bool			hdr_forced_writes;
 	TEXT			database_security_class[GDS_NAME_LEN]; // To save database security class for deferred update
 
@@ -1081,6 +1098,9 @@ public:
 
 	char veryEnd;
 	//starting after this members must be initialized in constructor explicitly
+
+	Firebird::FbLocalStatus status_vector;
+	Firebird::ThrowLocalStatus throwStatus;
 
 	Firebird::Array<Firebird::Pair<Firebird::NonPooled<Firebird::MetaName, Firebird::MetaName> > >
 		defaultCollations;
@@ -1154,5 +1174,50 @@ enum burp_messages_vals {
 
 // BLOB buffer
 typedef Firebird::HalfStaticArray<UCHAR, 1024> BlobBuffer;
+
+class BurpSql : public Firebird::AutoStorage
+{
+public:
+	BurpSql(BurpGlobals* g, const char* sql)
+		: Firebird::AutoStorage(),
+		  tdgbl(g), stmt(nullptr)
+	{
+		stmt = tdgbl->db_handle->prepare(&tdgbl->throwStatus, tdgbl->tr_handle, 0, sql, 3, 0);
+	}
+
+	template <typename M>
+	void singleSelect(Firebird::ITransaction* trans, M* msg)
+	{
+		stmt->execute(&tdgbl->throwStatus, tdgbl->tr_handle, nullptr, nullptr, msg->getMetadata(), msg->getData());
+	}
+
+	template <typename M>
+	void execute(Firebird::ITransaction* trans, M* msg)
+	{
+		stmt->execute(&tdgbl->throwStatus, tdgbl->tr_handle, msg->getMetadata(), msg->getData(), nullptr, nullptr);
+	}
+
+	void execute(Firebird::ITransaction* trans)
+	{
+		stmt->execute(&tdgbl->throwStatus, tdgbl->tr_handle, nullptr, nullptr, nullptr, nullptr);
+	}
+
+private:
+	BurpGlobals* tdgbl;
+	Firebird::IStatement* stmt;
+};
+
+class OutputVersion : public Firebird::IVersionCallbackImpl<OutputVersion, Firebird::CheckStatusWrapper>
+{
+public:
+	OutputVersion(const char* printFormat)
+		: format(printFormat)
+	{ }
+
+	void callback(Firebird::CheckStatusWrapper* status, const char* text);
+
+private:
+	const char* format;
+};
 
 #endif // BURP_BURP_H

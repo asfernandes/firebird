@@ -34,14 +34,14 @@ namespace {
 
 void raise()
 {
-	(Arg::Gds(isc_random) << "Missing user management plugin").raise();
+	Arg::Gds(isc_user_manager).raise();
 }
 
 } // anonymous namespace
 
 namespace Auth {
 
-Get::Get(Config* firebirdConf)
+Get::Get(const Config* firebirdConf)
 	: GetPlugins<Firebird::IManagement>(IPluginManager::TYPE_AUTH_USER_MANAGEMENT, firebirdConf)
 {
 	if (!hasData())
@@ -50,7 +50,7 @@ Get::Get(Config* firebirdConf)
 	}
 }
 
-Get::Get(Config* firebirdConf, const char* plugName)
+Get::Get(const Config* firebirdConf, const char* plugName)
 	: GetPlugins<Firebird::IManagement>(IPluginManager::TYPE_AUTH_USER_MANAGEMENT, firebirdConf, plugName)
 {
 	if (!hasData())

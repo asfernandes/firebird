@@ -31,6 +31,7 @@
 #define JRD_THREADSTART_H
 
 #include "../common/ThreadData.h"
+#include "../common/classes/semaphore.h"
 
 #ifdef WIN_NT
 #include <windows.h>
@@ -74,9 +75,10 @@ public:
 	typedef pthread_t Handle;
 #endif
 
-	static void	start(ThreadEntryPoint* routine, void* arg, int priority_arg, Handle* p_handle = NULL);
+	static ThreadId	start(ThreadEntryPoint* routine, void* arg, int priority_arg, Handle* p_handle = NULL);
 	static void waitForCompletion(Handle& handle);
 	static void kill(Handle& handle);
+	static bool isCurrent(const ThreadId threadId);
 
 	static ThreadId getId();
 
@@ -88,5 +90,89 @@ inline ThreadId getThreadId()
 {
 	return Thread::getId();
 }
+
+
+#ifndef USE_POSIX_THREADS
+#define USE_FINI_SEM
+#endif
+
+template <typename TA>
+class ThreadFinishSync
+{
+public:
+	typedef void ThreadRoutine(TA);
+
+	ThreadFinishSync(Firebird::MemoryPool& pool, ThreadRoutine* routine, int priority_arg)
+		:
+#ifdef USE_FINI_SEM
+		  fini(pool),
+#else
+		  threadHandle(0),
+#endif
+		  threadRoutine(routine),
+		  threadPriority(priority_arg)
+	{ }
+
+	void run(TA arg)
+	{
+		threadArg = arg;
+
+		Thread::start(internalRun, this, threadPriority
+#ifndef USE_FINI_SEM
+					, &threadHandle
+#endif
+			);
+	}
+
+	void waitForCompletion()
+	{
+#ifdef USE_FINI_SEM
+		fini.enter();
+#else
+		Thread::waitForCompletion(threadHandle);
+		threadHandle = 0;
+#endif
+	}
+
+private:
+#ifdef USE_FINI_SEM
+	Firebird::Semaphore fini;
+#else
+	Thread::Handle threadHandle;
+#endif
+
+	TA threadArg;
+	ThreadRoutine* threadRoutine;
+	int threadPriority;
+
+	static THREAD_ENTRY_DECLARE internalRun(THREAD_ENTRY_PARAM arg)
+	{
+		((ThreadFinishSync*) arg)->internalRun();
+		return 0;
+	}
+
+	void internalRun()
+	{
+		try
+		{
+			threadRoutine(threadArg);
+		}
+		catch (const Firebird::Exception& ex)
+		{
+			threadArg->exceptionHandler(ex, threadRoutine);
+		}
+
+#ifdef USE_FINI_SEM
+		try
+		{
+			fini.release();
+		}
+		catch (const Firebird::Exception& ex)
+		{
+			threadArg->exceptionHandler(ex, threadRoutine);
+		}
+#endif
+	}
+};
 
 #endif // JRD_THREADSTART_H

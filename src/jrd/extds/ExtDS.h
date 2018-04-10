@@ -47,7 +47,7 @@ class Statement;
 class Blob;
 
 enum TraModes {traReadCommited, traReadCommitedRecVersions, traConcurrency, traConsistency};
-enum TraScope {traAutonomous = 1, traCommon, traTwoPhase};
+enum TraScope {traNotSet = 0, traAutonomous, traCommon, traTwoPhase};
 
 // Known built-in provider's names
 extern const char* FIREBIRD_PROVIDER_NAME;
@@ -160,7 +160,7 @@ public:
 		const Firebird::MetaName& role) = 0;
 	virtual void detach(Jrd::thread_db* tdbb);
 
-	virtual bool cancelExecution() = 0;
+	virtual bool cancelExecution(bool forced) = 0;
 
 	int getSqlDialect() const { return m_sqlDialect; }
 
@@ -201,7 +201,7 @@ public:
 	// transaction into m_transactions array and delete not needed transaction
 	// immediately (as we didn't pool transactions)
 	Transaction* createTransaction();
-	void deleteTransaction(Transaction* tran);
+	void deleteTransaction(Jrd::thread_db* tdbb, Transaction* tran);
 
 	// Statements management within connection scope : put newly created
 	// statement into m_statements array, but don't delete freed statement
@@ -318,13 +318,14 @@ public:
 	Transaction* getTransaction() { return m_transaction; }
 
 	void prepare(Jrd::thread_db* tdbb, Transaction* tran, const Firebird::string& sql, bool named);
+	void setTimeout(Jrd::thread_db* tdbb, unsigned int timeout);
 	void execute(Jrd::thread_db* tdbb, Transaction* tran,
 		const Firebird::MetaName* const* in_names, const Jrd::ValueListNode* in_params,
 		const Jrd::ValueListNode* out_params);
 	void open(Jrd::thread_db* tdbb, Transaction* tran,
 		const Firebird::MetaName* const* in_names, const Jrd::ValueListNode* in_params, bool singleton);
 	bool fetch(Jrd::thread_db* tdbb, const Jrd::ValueListNode* out_params);
-	void close(Jrd::thread_db* tdbb);
+	void close(Jrd::thread_db* tdbb, bool invalidTran = false);
 	void deallocate(Jrd::thread_db* tdbb);
 
 	const Firebird::string& getSql() const { return m_sql; }
@@ -352,6 +353,7 @@ public:
 
 protected:
 	virtual void doPrepare(Jrd::thread_db* tdbb, const Firebird::string& sql) = 0;
+	virtual void doSetTimeout(Jrd::thread_db* tdbb, unsigned int timeout) = 0;
 	virtual void doExecute(Jrd::thread_db* tdbb) = 0;
 	virtual void doOpen(Jrd::thread_db* tdbb) = 0;
 	virtual bool doFetch(Jrd::thread_db* tdbb) = 0;
@@ -468,6 +470,7 @@ private:
 	void init(Jrd::thread_db* tdbb, Connection& conn, const char* from);
 
 	Jrd::thread_db* m_tdbb;
+	Firebird::RefPtr<Jrd::StableAttachmentPart> m_stable;
 	Firebird::Mutex* m_mutex;
 	Connection* m_saveConnection;
 };

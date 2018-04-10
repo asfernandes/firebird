@@ -32,6 +32,7 @@
 Maximum alignments for corresponding data types are defined in dsc.h
 */
 
+#include "../common/DecFloat.h"
 #include "../jrd/blr.h"
 
 /*  The following macro must be defined as the highest-numericly-valued
@@ -67,7 +68,9 @@ static const USHORT gds_cvt_blr_dtype[DTYPE_BLR_MAX + 1] =
 	dtype_int64,				/* blr_int64 == 16 */
 	0, 0, 0, 0, 0, 0,
 	dtype_boolean,				// blr_bool == 23
-	0, 0, 0,
+	dtype_dec64,				/* blr_dec64 == 24 */
+	dtype_dec128,				/* blr_dec128 == 25 */
+	dtype_dec_fixed,			/* blr_dec_fixed == 26 */
 	dtype_double,				/* blr_double == 27 */
 	0, 0, 0, 0, 0, 0, 0,
 	dtype_timestamp,			/* blr_timestamp == 35 */
@@ -103,7 +106,10 @@ static const USHORT type_alignments[DTYPE_TYPE_MAX] =
 	sizeof(SLONG),				/* dtype_array */
 	sizeof(SINT64),				/* dtype_int64 */
 	sizeof(ULONG),				/* dtype_dbkey */
-	sizeof(UCHAR)				/* dtype_boolean */
+	sizeof(UCHAR),				/* dtype_boolean */
+	sizeof(Firebird::Decimal64),/* dtype_dec64 */
+	sizeof(Firebird::Decimal64),/* dtype_dec128 */
+	sizeof(Firebird::Decimal64)	/* dtype_dec_fixed */
 };
 
 static const USHORT type_lengths[DTYPE_TYPE_MAX] =
@@ -128,8 +134,11 @@ static const USHORT type_lengths[DTYPE_TYPE_MAX] =
 	sizeof(ISC_QUAD),			/* dtype_blob */
 	sizeof(ISC_QUAD),			/* dtype_array */
 	sizeof(SINT64),				/* dtype_int64 */
-	sizeof(RecordNumber::Packed), /*dtype_dbkey */
-	sizeof(UCHAR)				/* dtype_boolean */
+	sizeof(RecordNumber::Packed),/*dtype_dbkey */
+	sizeof(UCHAR),				/* dtype_boolean */
+	sizeof(Firebird::Decimal64),/* dtype_dec64 */
+	sizeof(Firebird::Decimal128),/*dtype_dec128 */
+	sizeof(Firebird::DecimalFixed)	/*	dtype_dec_fixed */
 };
 
 
@@ -158,7 +167,10 @@ static const USHORT type_significant_bits[DTYPE_TYPE_MAX] =
 	sizeof(ISC_QUAD) * 8,		/* dtype_array */
 	sizeof(SINT64) * 8,			/* dtype_int64 */
 	0,							// dtype_dbkey
-	0							// dtype_boolean
+	0,							// dtype_boolean
+	0,							// dtype_dec64
+	0,							// dtype_dec128
+	0							// dtype_dec_fixed
 };
 
 #endif /* JRD_ALIGN_H */

@@ -22,12 +22,19 @@
 
 #include "firebird.h"
 #include <ctype.h>
+#include <math.h>
 #include "../dsql/Parser.h"
 #include "../dsql/chars.h"
 #include "../jrd/jrd.h"
 #include "../jrd/DataTypeUtil.h"
 #include "../yvalve/keywords.h"
 #include "../jrd/intl_proto.h"
+
+#ifdef HAVE_FLOAT_H
+#include <float.h>
+#else
+#define DBL_MAX_10_EXP          308
+#endif
 
 using namespace Firebird;
 using namespace Jrd;
@@ -37,9 +44,9 @@ namespace
 {
 	const int HASH_SIZE = 1021;
 
-	struct KeywordVersion
+	struct Keyword
 	{
-		KeywordVersion(int aKeyword, MetaName* aStr)
+		Keyword(int aKeyword, MetaName* aStr)
 			: keyword(aKeyword), str(aStr)
 		{}
 
@@ -47,16 +54,16 @@ namespace
 		MetaName* str;
 	};
 
-	class KeywordsMap : public GenericMap<Pair<Left<MetaName, KeywordVersion> > >
+	class KeywordsMap : public GenericMap<Pair<Left<MetaName, Keyword> > >
 	{
 	public:
 		explicit KeywordsMap(MemoryPool& pool)
-			: GenericMap<Pair<Left<MetaName, KeywordVersion> > >(pool)
+			: GenericMap<Pair<Left<MetaName, Keyword> > >(pool)
 		{
 			for (const TOK* token = KEYWORD_getTokens(); token->tok_string; ++token)
 			{
 				MetaName* str = FB_NEW_POOL(pool) MetaName(token->tok_string);
-				put(*str, KeywordVersion(token->tok_ident, str));
+				put(*str, Keyword(token->tok_ident, str));
 			}
 		}
 
@@ -97,7 +104,7 @@ Parser::Parser(thread_db* tdbb, MemoryPool& pool, DsqlCompilerScratch* aScratch,
 	yylexemes = 0;
 
 	lex.start = string;
-	lex.line_start = lex.ptr = string;
+	lex.line_start = lex.last_token = lex.ptr = string;
 	lex.end = string + length;
 	lex.lines = 1;
 	lex.att_charset = characterSet;
@@ -322,17 +329,12 @@ bool Parser::yylexSkipSpaces()
 		if (lex.ptr >= lex.end)
 			return false;
 
-		c = *lex.ptr++;
+		if (yylexSkipEol())
+			continue;
 
 		// Process comments
 
-		if (c == '\n')
-		{
-			lex.lines++;
-			lex.line_start = lex.ptr;
-			continue;
-		}
-
+		c = *lex.ptr++;
 		if (c == '-' && lex.ptr < lex.end && *lex.ptr == '-')
 		{
 			// single-line
@@ -340,12 +342,9 @@ bool Parser::yylexSkipSpaces()
 			lex.ptr++;
 			while (lex.ptr < lex.end)
 			{
-				if ((c = *lex.ptr++) == '\n')
-				{
-					lex.lines++;
-					lex.line_start = lex.ptr; // + 1; // CVC: +1 left out.
+				if (yylexSkipEol())
 					break;
-				}
+				lex.ptr++;
 			}
 			if (lex.ptr >= lex.end)
 				return false;
@@ -360,16 +359,13 @@ bool Parser::yylexSkipSpaces()
 			lex.ptr++;
 			while (lex.ptr < lex.end)
 			{
+				if (yylexSkipEol())
+					continue;
+
 				if ((c = *lex.ptr++) == '*')
 				{
 					if (*lex.ptr == '/')
 						break;
-				}
-				if (c == '\n')
-				{
-					lex.lines++;
-					lex.line_start = lex.ptr; // + 1; // CVC: +1 left out.
-
 				}
 			}
 			if (lex.ptr >= lex.end)
@@ -394,13 +390,42 @@ bool Parser::yylexSkipSpaces()
 }
 
 
+bool Parser::yylexSkipEol()
+{
+	bool eol = false;
+	const TEXT c = *lex.ptr;
+
+	if (c == '\r')
+	{
+		lex.ptr++;
+		if (lex.ptr < lex.end && *lex.ptr == '\n')
+			lex.ptr++;
+
+		eol = true;
+	}
+	else if (c == '\n')
+	{
+		lex.ptr++;
+		eol = true;
+	}
+
+	if (eol)
+	{
+		lex.lines++;
+		lex.line_start = lex.ptr; // + 1; // CVC: +1 left out.
+	}
+
+	return eol;
+}
+
+
 int Parser::yylexAux()
 {
 	thread_db* tdbb = JRD_get_thread_data();
 	Database* const dbb = tdbb->getDatabase();
 	MemoryPool& pool = *tdbb->getDefaultPool();
 
-	int maxByteLength, maxCharLength;
+	unsigned maxByteLength, maxCharLength;
 
 	if (scratch->flags & DsqlCompilerScratch::FLAG_INTERNAL_REQUEST)
 	{
@@ -437,14 +462,14 @@ int Parser::yylexAux()
 		check_bound(p, string);
 
 		if (p > string + maxByteLength || p > string + maxCharLength)
-			yyabandon(-104, isc_dyn_name_longer);
+			yyabandon(yyposn, -104, isc_dyn_name_longer);
 
 		*p = 0;
 
 		// make a string value to hold the name, the name is resolved in pass1_constant.
 		yylval.metaNamePtr = FB_NEW_POOL(pool) MetaName(pool, string, p - string);
 
-		return INTRODUCER;
+		return TOK_INTRODUCER;
 	}
 
 	// parse a quoted string, being sure to look for double quotes
@@ -519,7 +544,7 @@ int Parser::yylexAux()
 			{
 				if (buffer != string)
 					gds__free (buffer);
-				yyabandon (-104, isc_invalid_string_constant);
+				yyabandon(yyposn, -104, isc_invalid_string_constant);
 			}
 			else if (client_dialect >= SQL_DIALECT_V6)
 			{
@@ -527,35 +552,35 @@ int Parser::yylexAux()
 				{
 					if (buffer != string)
 						gds__free (buffer);
-					yyabandon(-104, isc_token_too_long);
+					yyabandon(yyposn, -104, isc_token_too_long);
 				}
 				else if (p > &buffer[MAX_SQL_IDENTIFIER_LEN])
 				{
 					if (buffer != string)
 						gds__free (buffer);
-					yyabandon(-104, isc_dyn_name_longer);
+					yyabandon(yyposn, -104, isc_dyn_name_longer);
 				}
 				else if (p - buffer == 0)
 				{
 					if (buffer != string)
 						gds__free (buffer);
-					yyabandon(-104, isc_dyn_zero_len_id);
+					yyabandon(yyposn, -104, isc_dyn_zero_len_id);
 				}
 
-				Attachment* attachment = tdbb->getAttachment();
-				MetaName name(attachment->nameToMetaCharSet(tdbb, MetaName(buffer, p - buffer)));
-				int charLength = metadataCharSet->length(
+				Attachment* const attachment = tdbb->getAttachment();
+				const MetaName name(attachment->nameToMetaCharSet(tdbb, MetaName(buffer, p - buffer)));
+				const unsigned charLength = metadataCharSet->length(
 					name.length(), (const UCHAR*) name.c_str(), true);
 
 				if (name.length() > maxByteLength || charLength > maxCharLength)
-					yyabandon(-104, isc_dyn_name_longer);
+					yyabandon(yyposn, -104, isc_dyn_name_longer);
 
 				yylval.metaNamePtr = FB_NEW_POOL(pool) MetaName(pool, name);
 
 				if (buffer != string)
 					gds__free (buffer);
 
-				return SYMBOL;
+				return TOK_SYMBOL;
 			}
 		}
 		yylval.intlStringPtr = newIntlString(Firebird::string(buffer, p - buffer));
@@ -566,7 +591,7 @@ int Parser::yylexAux()
 		mark.str = yylval.intlStringPtr;
 		strMarks.put(mark.str, mark);
 
-		return STRING;
+		return TOK_STRING;
 	}
 
 	/*
@@ -694,7 +719,7 @@ int Parser::yylexAux()
 
 			yylval.intlStringPtr = newIntlString(temp, "BINARY");
 
-			return STRING;
+			return TOK_STRING;
 		}  // if (!hexerror)...
 
 		// If we got here, there was a parsing error.  Set the
@@ -749,7 +774,7 @@ int Parser::yylexAux()
 				mark.str = yylval.intlStringPtr;
 				strMarks.put(mark.str, mark);
 
-				return STRING;
+				return TOK_STRING;
 			}
 		}
 
@@ -859,7 +884,7 @@ int Parser::yylexAux()
 				}
 
 				// The return value can be a negative number.
-				return NUMBER64BIT;
+				return TOK_NUMBER64BIT;
 			}
 			else
 			{
@@ -908,7 +933,7 @@ int Parser::yylexAux()
 				}
 
 				yylval.int32Val = (SLONG) value;
-				return NUMBER;
+				return TOK_NUMBER;
 			} // integer value
 		}  // if (!hexerror)...
 
@@ -925,15 +950,19 @@ int Parser::yylexAux()
 	{
 		// The following variables are used to recognize kinds of numbers.
 
-		bool have_error = false;	// syntax error or value too large
-		bool have_digit = false;	// we've seen a digit
-		bool have_decimal = false;	// we've seen a '.'
-		bool have_exp = false;	// digit ... [eE]
-		bool have_exp_sign = false; // digit ... [eE] {+-]
-		bool have_exp_digit = false; // digit ... [eE] ... digit
+		bool have_error = false;		// syntax error or value too large
+		bool have_digit = false;		// we've seen a digit
+		bool have_decimal = false;		// we've seen a '.'
+		bool have_exp = false;			// digit ... [eE]
+		bool have_exp_sign = false;		// digit ... [eE] {+-]
+		bool have_exp_digit = false;	// digit ... [eE] ... digit
+		bool have_overflow = false;		// value of digits > MAX_SINT64
+		bool positive_overflow = false;	// number is exactly (MAX_SINT64 + 1)
 		FB_UINT64 number = 0;
+		int expVal = 0;
 		FB_UINT64 limit_by_10 = MAX_SINT64 / 10;
-		SCHAR scale = 0;
+		int scale = 0;
+		int expSign = 1;
 
 		for (--lex.ptr; lex.ptr < lex.end; lex.ptr++)
 		{
@@ -953,10 +982,22 @@ int Parser::yylexAux()
 			{
 				// We've seen e or E, but nothing beyond that.
 				if ( ('-' == c) || ('+' == c) )
+				{
 					have_exp_sign = true;
+					if ('-' == c)
+						expSign = -1;
+				}
 				else if ( classes(c) & CHR_DIGIT )
+				{
 					// We have a digit: we haven't seen a sign yet, but it's too late now.
 					have_exp_digit = have_exp_sign  = true;
+					if (!have_overflow)
+					{
+						expVal = expVal * 10 + (c - '0');
+						if (expVal > DBL_MAX_10_EXP)
+							have_overflow = true;
+					}
+				}
 				else
 				{
 					// end of the token
@@ -978,19 +1019,26 @@ int Parser::yylexAux()
 			{
 				// Before computing the next value, make sure there will be no overflow.
 
-				have_digit = true;
-
-				if (number >= limit_by_10)
+				if (!have_overflow)
 				{
-					// possibility of an overflow
-					if ((number > limit_by_10) || (c > '8'))
+					have_digit = true;
+
+					if (number >= limit_by_10)
 					{
-						have_error = true;
-						break;
+						// possibility of an overflow
+						if ((number > limit_by_10) || (c >= '8'))
+						{
+							have_overflow = true;
+							if ((number == limit_by_10) && (c == '8'))
+								positive_overflow = true;
+						}
 					}
 				}
+				else
+					positive_overflow = false;
 
-				number = number * 10 + (c - '0');
+				if (!have_overflow)
+					number = number * 10 + (c - '0');
 
 				if (have_decimal)
 					--scale;
@@ -1009,15 +1057,48 @@ int Parser::yylexAux()
 		{
 			fb_assert(have_digit);
 
-			if (have_exp_digit)
+			if (positive_overflow)
+				have_overflow = false;
+
+			if (scale < MIN_SCHAR || scale > MAX_SCHAR)
 			{
+				have_overflow = true;
+				positive_overflow = false;
+			}
+
+			// check for a more complex overflow case
+			if ((!have_overflow) && (expSign > 0) && (expVal > -scale))
+			{
+				expVal += scale;
+				double maxNum = DBL_MAX / pow(10.0, expVal);
+				if (double(number) > maxNum)
+				{
+					have_overflow = true;
+					positive_overflow = false;
+				}
+			}
+
+			// Should we use floating point type?
+			if (have_exp_digit || have_overflow || positive_overflow)
+			{
+				if (positive_overflow && scale)
+				{
+					yylval.lim64ptr = newLim64String(
+						Firebird::string(lex.last_token, lex.ptr - lex.last_token), scale);
+					lex.last_token_bk = lex.last_token;
+					lex.line_start_bk = lex.line_start;
+					lex.lines_bk = lex.lines;
+
+					return TOK_LIMIT64_NUMBER;
+				}
+
 				yylval.stringPtr = newString(
 					Firebird::string(lex.last_token, lex.ptr - lex.last_token));
 				lex.last_token_bk = lex.last_token;
 				lex.line_start_bk = lex.line_start;
 				lex.lines_bk = lex.lines;
 
-				return FLOAT_NUMBER;
+				return positive_overflow ? TOK_LIMIT64_INT : have_overflow ? TOK_DECIMAL_NUMBER : TOK_FLOAT_NUMBER;
 			}
 
 			if (!have_exp)
@@ -1030,7 +1111,7 @@ int Parser::yylexAux()
 				{
 					yylval.int32Val = (SLONG) number;
 					//printf ("parse.y %p %d\n", yylval.legacyStr, number);
-					return NUMBER;
+					return TOK_NUMBER;
 				}
 				else
 				{
@@ -1061,7 +1142,7 @@ int Parser::yylexAux()
 					{
 						yylval.stringPtr = newString(
 							Firebird::string(lex.last_token, lex.ptr - lex.last_token));
-						return FLOAT_NUMBER;
+						return TOK_FLOAT_NUMBER;
 					}
 
 					yylval.scaledNumber.number = number;
@@ -1069,9 +1150,9 @@ int Parser::yylexAux()
 					yylval.scaledNumber.hex = false;
 
 					if (have_decimal)
-						return SCALEDINT;
+						return TOK_SCALEDINT;
 
-					return NUMBER64BIT;
+					return TOK_NUMBER64BIT;
 				}
 			} // else if (!have_exp)
 		} // if (!have_error)
@@ -1103,12 +1184,12 @@ int Parser::yylexAux()
 		*p = 0;
 
 		if (p > &string[maxByteLength] || p > &string[maxCharLength])
-			yyabandon(-104, isc_dyn_name_longer);
+			yyabandon(yyposn, -104, isc_dyn_name_longer);
 
-		MetaName str(string, p - string);
-		KeywordVersion* keyVer = keywordsMap->get(str);
+		const MetaName str(string, p - string);
+		const Keyword* const keyVer = keywordsMap->get(str);
 
-		if (keyVer && (keyVer->keyword != COMMENT || lex.prev_keyword == -1))
+		if (keyVer && (keyVer->keyword != TOK_COMMENT || lex.prev_keyword == -1))
 		{
 			yylval.metaNamePtr = keyVer->str;
 			lex.last_token_bk = lex.last_token;
@@ -1121,15 +1202,15 @@ int Parser::yylexAux()
 		lex.last_token_bk = lex.last_token;
 		lex.line_start_bk = lex.line_start;
 		lex.lines_bk = lex.lines;
-		return SYMBOL;
+		return TOK_SYMBOL;
 	}
 
 	// Must be punctuation -- test for double character punctuation
 
 	if (lex.last_token + 1 < lex.end && !isspace(UCHAR(lex.last_token[1])))
 	{
-		Firebird::string str(lex.last_token, 2);
-		KeywordVersion* keyVer = keywordsMap->get(str);
+		const MetaName str(lex.last_token, 2);
+		const Keyword* const keyVer = keywordsMap->get(str);
 
 		if (keyVer)
 		{
@@ -1206,7 +1287,7 @@ void Parser::yyerrorIncompleteCmd()
 void Parser::check_bound(const char* const to, const char* const string)
 {
 	if ((to - string) >= Parser::MAX_TOKEN_LEN)
-		yyabandon(-104, isc_token_too_long);
+		yyabandon(yyposn, -104, isc_token_too_long);
 }
 
 void Parser::check_copy_incr(char*& to, const char ch, const char* const string)
@@ -1216,7 +1297,7 @@ void Parser::check_copy_incr(char*& to, const char ch, const char* const string)
 }
 
 
-void Parser::yyabandon(SLONG sql_code, ISC_STATUS error_symbol)
+void Parser::yyabandon(const Position& position, SLONG sql_code, ISC_STATUS error_symbol)
 {
 /**************************************
  *
@@ -1229,6 +1310,26 @@ void Parser::yyabandon(SLONG sql_code, ISC_STATUS error_symbol)
  *
  **************************************/
 
-	ERRD_post(Arg::Gds(isc_sqlerr) << Arg::Num(sql_code) <<
-			  Arg::Gds(error_symbol));
+	ERRD_post(
+		Arg::Gds(isc_sqlerr) << Arg::Num(sql_code) << Arg::Gds(error_symbol) <<
+		Arg::Gds(isc_dsql_line_col_error) <<
+			Arg::Num(position.firstLine) << Arg::Num(position.firstColumn));
+}
+
+void Parser::yyabandon(const Position& position, SLONG sql_code, const Arg::StatusVector& status)
+{
+/**************************************
+ *
+ *	y y a b a n d o n
+ *
+ **************************************
+ *
+ * Functional description
+ *	Abandon the parsing outputting the supplied string
+ *
+ **************************************/
+	ERRD_post(
+		Arg::Gds(isc_sqlerr) << Arg::Num(sql_code) << status <<
+		Arg::Gds(isc_dsql_line_col_error) <<
+			Arg::Num(position.firstLine) << Arg::Num(position.firstColumn));
 }

@@ -379,7 +379,7 @@ int gsec(Firebird::UtilSvc* uSvc)
 	}
 	else
 	{
-		const Firebird::RefPtr<Config> defConf(Config::getDefaultConfig());
+		const Firebird::RefPtr<const Config> defConf(Config::getDefaultConfig());
 		databaseName = defConf->getSecurityDatabase();
 	}
 
@@ -460,8 +460,8 @@ int gsec(Firebird::UtilSvc* uSvc)
 		Firebird::string databaseText;
 		databaseText.printf("SecurityDatabase = %s\n", databaseName.c_str());
 		ConfigFile gsecDatabase(ConfigFile::USE_TEXT, databaseText.c_str());
-		Firebird::RefPtr<Config> defaultConfig(Config::getDefaultConfig());
-		Firebird::RefPtr<Config> pseudoConfig(FB_NEW Config(gsecDatabase, *defaultConfig));
+		Firebird::RefPtr<const Config> defaultConfig(Config::getDefaultConfig());
+		Firebird::RefPtr<const Config> pseudoConfig(FB_NEW Config(gsecDatabase, *defaultConfig));
 
 		uSvc->checkService();
 
@@ -475,8 +475,7 @@ int gsec(Firebird::UtilSvc* uSvc)
 				manager = getPlugin.plugin();
 				if (!manager)
 				{
-					GSEC_error_redirect((Firebird::Arg::Gds(isc_random) <<
-						"Management plugin is missing or failed to load").value(), GsecMsg15);
+					GSEC_error_redirect(Firebird::Arg::Gds(isc_user_manager).value(), GsecMsg15);
 				}
 
 				GsecInfo info(user_data->dba.get(), user_data->role.get(),

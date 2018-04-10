@@ -35,7 +35,7 @@ class NullableClear
 public:
 	static void clear(T& v)
 	{
-		v = 0;
+		v = T();
 	}
 };
 
@@ -60,9 +60,19 @@ public:
 		return nullable;
 	}
 
+	T orElse(T elseValue) const
+	{
+		return specified ? value : elseValue;
+	}
+
 	bool operator ==(const BaseNullable<T>& o) const
 	{
 		return (!specified && !o.specified) || (specified == o.specified && value == o.value);
+	}
+
+	bool operator ==(const T& o) const
+	{
+		return specified && value == o;
 	}
 
 	void operator =(const T& v)
@@ -79,26 +89,6 @@ public:
 
 // NullableClear specializations.
 
-template <>
-class NullableClear<Firebird::string>	// string especialization for NullableClear
-{
-public:
-	static void clear(Firebird::string& v)
-	{
-		v = "";
-	}
-};
-
-template <>
-class NullableClear<Firebird::MetaName>	// MetaName especialization for NullableClear
-{
-public:
-	static void clear(Firebird::MetaName& v)
-	{
-		v = "";
-	}
-};
-
 template <typename T>
 class NullableClear<BaseNullable<T> >
 {
@@ -109,6 +99,15 @@ public:
 	}
 };
 
+template <>
+class NullableClear<rel_t>
+{
+public:
+	static void clear(rel_t& v)
+	{
+		v = rel_persistent;
+	}
+};
 
 // Actual Nullable template.
 template <typename T> class Nullable : public BaseNullable<T>

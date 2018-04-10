@@ -276,6 +276,7 @@ bool SortedStream::compareKeys(const UCHAR* p, const UCHAR* q) const
 
 	fb_assert(m_map->keyItems.getCount() % 2 == 0);
 	const USHORT count = m_map->keyItems.getCount() / 2;
+	thread_db* tdbb = JRD_get_thread_data();
 
 	for (USHORT i = 0; i < count; i++)
 	{
@@ -295,7 +296,7 @@ bool SortedStream::compareKeys(const UCHAR* p, const UCHAR* q) const
 			dsc desc2 = item->desc;
 			desc2.dsc_address = const_cast<UCHAR*>(q) + (IPTR) desc2.dsc_address;
 
-			if (MOV_compare(&desc1, &desc2))
+			if (MOV_compare(tdbb, &desc1, &desc2))
 				return false;
 		}
 	}
@@ -328,7 +329,7 @@ void SortedStream::mapData(thread_db* tdbb, jrd_req* request, UCHAR* data) const
 		from = item->desc;
 		from.dsc_address = data + (IPTR) from.dsc_address;
 
-		if (item->node && !item->node->is<FieldNode>())
+		if (item->node && !nodeIs<FieldNode>(item->node))
 			continue;
 
 		// if moving a TEXT item into the key portion of the sort record,
@@ -338,13 +339,14 @@ void SortedStream::mapData(thread_db* tdbb, jrd_req* request, UCHAR* data) const
 		// a sort key, there is a later nod_field in the item
 		// list that contains the data to send back
 
-		if (IS_INTL_DATA(&item->desc) &&
+		if ((IS_INTL_DATA(&item->desc) || item->desc.isDecFloat()) &&
 			(ULONG)(IPTR) item->desc.dsc_address < m_map->keyLength)
 		{
 			continue;
 		}
 
 		record_param* const rpb = &request->req_rpb[item->stream];
+		jrd_rel* const relation = rpb->rpb_relation;
 
 		const SSHORT id = item->fieldId;
 
@@ -365,7 +367,14 @@ void SortedStream::mapData(thread_db* tdbb, jrd_req* request, UCHAR* data) const
 				fb_assert(false);
 			}
 
-			rpb->rpb_runtime_flags |= RPB_refetch;
+			if (relation &&
+				!relation->rel_file &&
+				!relation->rel_view_rse &&
+				!relation->isVirtual())
+			{
+				rpb->rpb_runtime_flags |= RPB_refetch;
+			}
+
 			continue;
 		}
 
@@ -380,8 +389,8 @@ void SortedStream::mapData(thread_db* tdbb, jrd_req* request, UCHAR* data) const
 			// dimitr:	I've added the check for !isValid to ensure that we don't overwrite
 			//			the format for an active rpb (i.e. the one having some record fetched).
 			//			See CORE-3806 for example.
-			if (rpb->rpb_relation && !rpb->rpb_number.isValid())
-				VIO_record(tdbb, rpb, MET_current(tdbb, rpb->rpb_relation), tdbb->getDefaultPool());
+			if (relation && !rpb->rpb_number.isValid())
+				VIO_record(tdbb, rpb, MET_current(tdbb, relation), tdbb->getDefaultPool());
 		}
 
 		Record* const record = rpb->rpb_record;

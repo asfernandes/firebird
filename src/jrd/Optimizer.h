@@ -161,6 +161,11 @@ public:
 		bool outer, bool inner, SortNode* sortNode);
 	~OptimizerRetrieval();
 
+	MemoryPool& getPool() const
+	{
+		return pool;
+	}
+
 	InversionCandidate* getInversion()
 	{
 		createIndexScanNodes = true;
@@ -260,7 +265,7 @@ public:
 
 	bool isFiltered() const
 	{
-		return (baseSelectivity < MAXIMUM_SELECTIVITY);
+		return (baseIndexes || baseSelectivity < MAXIMUM_SELECTIVITY);
 	}
 
 	IndexedRelationships indexedRelationships;

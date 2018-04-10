@@ -133,13 +133,21 @@
 	builder->setType(status, index, SQL_DOUBLE);	\
 	builder->setLength(status, index, sizeof(double));
 
+#define FB__META_FB_DECFLOAT16	\
+	builder->setType(status, index, SQL_DEC16);	\
+	builder->setLength(status, index, sizeof(FB_DEC16));
+
+#define FB__META_FB_DECFLOAT34	\
+	builder->setType(status, index, SQL_DEC34);	\
+	builder->setLength(status, index, sizeof(FB_DEC34));
+
 #define FB__META_FB_BLOB	\
 	builder->setType(status, index, SQL_BLOB);	\
 	builder->setLength(status, index, sizeof(ISC_QUAD));
 
 #define FB__META_FB_BOOLEAN	\
 	builder->setType(status, index, SQL_BOOLEAN);	\
-	builder->setLength(status, index, sizeof(ISC_BOOLEAN));
+	builder->setLength(status, index, sizeof(FB_BOOLEAN));
 
 #define FB__META_FB_DATE	\
 	builder->setType(status, index, SQL_DATE);	\
@@ -185,6 +193,8 @@
 #define FB__TYPE_FB_BIGINT						ISC_INT64
 #define FB__TYPE_FB_FLOAT						float
 #define FB__TYPE_FB_DOUBLE						double
+#define FB__TYPE_FB_DECFLOAT16					FB_DEC16
+#define FB__TYPE_FB_DECFLOAT34					FB_DEC34
 #define FB__TYPE_FB_BLOB						ISC_QUAD
 #define FB__TYPE_FB_BOOLEAN						ISC_UCHAR
 #define FB__TYPE_FB_DATE						::Firebird::FbDate

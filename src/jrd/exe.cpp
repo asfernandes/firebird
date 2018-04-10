@@ -192,6 +192,30 @@ void StatusXcp::as_sqlstate(char* sqlstate) const
 	fb_sqlstate(sqlstate, status->getErrors());
 }
 
+SLONG StatusXcp::as_xcpcode() const
+{
+	return (status->getErrors()[1] == isc_except) ? (SLONG) status->getErrors()[3] : 0;
+}
+
+string StatusXcp::as_text() const
+{
+	const ISC_STATUS* status_ptr = status->getErrors();
+
+	string errorText;
+
+	TEXT buffer[BUFFER_LARGE];
+	while (fb_interpret(buffer, sizeof(buffer), &status_ptr))
+	{
+		if (errorText.hasData())
+			errorText += "\n";
+
+		errorText += buffer;
+	}
+
+	return errorText;
+}
+
+
 static void execute_looper(thread_db*, jrd_req*, jrd_tra*, const StmtNode*, jrd_req::req_s);
 static void looper_seh(thread_db*, jrd_req*, const StmtNode*);
 static void release_blobs(thread_db*, jrd_req*);
@@ -256,14 +280,14 @@ void EXE_assignment(thread_db* tdbb, const ValueExprNode* to, dsc* from_desc, bo
 
 	SSHORT null = from_null ? -1 : 0;
 
-	if (!null && missing && MOV_compare(missing, from_desc) == 0)
+	if (!null && missing && MOV_compare(tdbb, missing, from_desc) == 0)
 		null = -1;
 
 	USHORT* impure_flags = NULL;
 	const ParameterNode* toParam;
 	const VariableNode* toVar;
 
-	if ((toParam = ExprNode::as<ParameterNode>(to)))
+	if ((toParam = nodeAs<ParameterNode>(to)))
 	{
 		const MessageNode* message = toParam->message;
 
@@ -276,7 +300,7 @@ void EXE_assignment(thread_db* tdbb, const ValueExprNode* to, dsc* from_desc, bo
 		impure_flags = request->getImpure<USHORT>(
 			message->impureFlags + (sizeof(USHORT) * toParam->argNumber));
 	}
-	else if ((toVar = ExprNode::as<VariableNode>(to)))
+	else if ((toVar = nodeAs<VariableNode>(to)))
 	{
 		if (toVar->varInfo)
 		{
@@ -370,7 +394,22 @@ void EXE_assignment(thread_db* tdbb, const ValueExprNode* to, dsc* from_desc, bo
 		{
 			// ASF: Don't let MOV_move call blb::move because MOV
 			// will not pass the destination field to blb::_move.
-			blb::move(tdbb, from_desc, to_desc, to);
+
+			record_param* rpb = NULL;
+			USHORT fieldId = 0;
+			if (to)
+			{
+				const FieldNode* toField = nodeAs<FieldNode>(to);
+				if (toField)
+				{
+					fieldId = toField->fieldId;
+					rpb = &request->req_rpb[toField->fieldStream];
+				}
+				else if (!(nodeAs<ParameterNode>(to) || nodeAs<VariableNode>(to)))
+					BUGCHECK(199);	// msg 199 expected field node
+			}
+
+			blb::move(tdbb, from_desc, to_desc, rpb, fieldId);
 		}
 		else if (!DSC_EQUIV(from_desc, to_desc, false))
 		{
@@ -408,7 +447,7 @@ void EXE_assignment(thread_db* tdbb, const ValueExprNode* to, dsc* from_desc, bo
 	// Handle the null flag as appropriate for fields and message arguments.
 
 
-	const FieldNode* toField = ExprNode::as<FieldNode>(to);
+	const FieldNode* toField = nodeAs<FieldNode>(to);
 	if (toField)
 	{
 		Record* record = request->req_rpb[toField->fieldStream].rpb_record;
@@ -543,10 +582,10 @@ void EXE_execute_ddl_triggers(thread_db* tdbb, jrd_tra* transaction, bool preTri
 
 		try
 		{
-			trig_vec triggers;
-			trig_vec* triggersPtr = &triggers;
+			TrigVector triggers;
+			TrigVector* triggersPtr = &triggers;
 
-			for (trig_vec::iterator i = attachment->att_ddl_triggers->begin();
+			for (TrigVector::iterator i = attachment->att_ddl_triggers->begin();
 				 i != attachment->att_ddl_triggers->end();
 				 ++i)
 			{
@@ -575,7 +614,7 @@ void EXE_receive(thread_db* tdbb,
 				 jrd_req* request,
 				 USHORT msg,
 				 ULONG length,
-				 UCHAR* buffer,
+				 void* buffer,
 				 bool top_level)
 {
 /**************************************
@@ -653,7 +692,7 @@ void EXE_receive(thread_db* tdbb,
 
 			if (desc->isBlob())
 			{
-				const bid* id = (bid*) (buffer + (ULONG)(IPTR)desc->dsc_address);
+				const bid* id = (bid*) (static_cast<UCHAR*>(buffer) + (ULONG)(IPTR) desc->dsc_address);
 
 				if (transaction->tra_blobs->locate(id->bid_temp_id()))
 				{
@@ -727,7 +766,7 @@ void EXE_release(thread_db* tdbb, jrd_req* request)
 }
 
 
-void EXE_send(thread_db* tdbb, jrd_req* request, USHORT msg, ULONG length, const UCHAR* buffer)
+void EXE_send(thread_db* tdbb, jrd_req* request, USHORT msg, ULONG length, const void* buffer)
 {
 /**************************************
  *
@@ -769,10 +808,10 @@ void EXE_send(thread_db* tdbb, jrd_req* request, USHORT msg, ULONG length, const
 
 		for (const NestConst<StmtNode>* end = selectNode->statements.end(); ptr != end; ++ptr)
 		{
-			const ReceiveNode* receiveNode = (*ptr)->as<ReceiveNode>();
+			const ReceiveNode* receiveNode = nodeAs<ReceiveNode>(*ptr);
 			message = receiveNode->message;
 
-			if (message->as<MessageNode>()->messageNumber == msg)
+			if (nodeAs<MessageNode>(message)->messageNumber == msg)
 			{
 				request->req_next = *ptr;
 				break;
@@ -791,63 +830,6 @@ void EXE_send(thread_db* tdbb, jrd_req* request, USHORT msg, ULONG length, const
 		ERR_post(Arg::Gds(isc_port_len) << Arg::Num(length) << Arg::Num(format->fmt_length));
 
 	memcpy(request->getImpure<UCHAR>(message->impureOffset), buffer, length);
-
-	for (USHORT i = 0; i < format->fmt_count; ++i)
-	{
-		const DSC* desc = &format->fmt_desc[i];
-
-		// ASF: I'll not test for dtype_cstring because usage is only internal
-		if (desc->dsc_dtype == dtype_text || desc->dsc_dtype == dtype_varying)
-		{
-			const UCHAR* p = request->getImpure<UCHAR>(message->impureOffset +
-				(ULONG)(IPTR) desc->dsc_address);
-			USHORT descLen = desc->dsc_length;
-			USHORT len;
-
-			switch (desc->dsc_dtype)
-			{
-				case dtype_text:
-					len = desc->dsc_length;
-					break;
-
-				case dtype_varying:
-					descLen -= sizeof(USHORT);
-					len = reinterpret_cast<const vary*>(p)->vary_length;
-					p += sizeof(USHORT);
-					break;
-			}
-
-			CharSet* charSet = INTL_charset_lookup(tdbb, DSC_GET_CHARSET(desc));
-
-			if (!charSet->wellFormed(len, p))
-				ERR_post(Arg::Gds(isc_malformed_string));
-
-			const USHORT srcCharLen = charSet->length(len, p, false);
-			const USHORT dstCharLen = descLen / charSet->maxBytesPerChar();
-
-			if (srcCharLen > dstCharLen)
-			{
-				status_exception::raise(
-					Arg::Gds(isc_arith_except) <<
-					Arg::Gds(isc_string_truncation) <<
-					Arg::Gds(isc_trunc_limits) << Arg::Num(dstCharLen) << Arg::Num(srcCharLen));
-			}
-		}
-		else if (desc->isBlob())
-		{
-			if (desc->getCharSet() != CS_NONE && desc->getCharSet() != CS_BINARY)
-			{
-				const Jrd::bid* bid = request->getImpure<Jrd::bid>(
-					message->impureOffset + (ULONG)(IPTR) desc->dsc_address);
-
-				if (!bid->isEmpty())
-				{
-					AutoBlb blob(tdbb, blb::open(tdbb, transaction/*tdbb->getTransaction()*/, bid));
-					blob.getBlb()->BLB_check_well_formed(tdbb, desc);
-				}
-			}
-		}
-	}
 
 	execute_looper(tdbb, request, transaction, request->req_next, jrd_req::req_proceed);
 }
@@ -942,7 +924,7 @@ void EXE_unwind(thread_db* tdbb, jrd_req* request)
 	{
 		const JrdStatement* statement = request->getStatement();
 
-		if (statement->fors.getCount() || request->req_ext_stmt)
+		if (statement->fors.getCount() || request->req_ext_resultset || request->req_ext_stmt)
 		{
 			Jrd::ContextPoolHolder context(tdbb, request->req_pool);
 			jrd_req* old_request = tdbb->getRequest();
@@ -958,7 +940,10 @@ void EXE_unwind(thread_db* tdbb, jrd_req* request)
 				}
 
 				if (request->req_ext_resultset)
+				{
 					delete request->req_ext_resultset;
+					request->req_ext_resultset = NULL;
+				}
 
 				while (request->req_ext_stmt)
 					request->req_ext_stmt->close(tdbb);
@@ -1029,7 +1014,14 @@ static void execute_looper(thread_db* tdbb,
 	if (!(request->req_flags & req_proc_fetch) && request->req_transaction)
 	{
 		if (transaction && !(transaction->tra_flags & TRA_system))
-			transaction->startSavepoint();
+		{
+			if (request->req_savepoints)
+			{
+				request->req_savepoints = request->req_savepoints->moveToStack(transaction->tra_save_point);
+			}
+			else
+				transaction->startSavepoint();
+		}
 	}
 
 	request->req_flags &= ~req_stall;
@@ -1046,15 +1038,20 @@ static void execute_looper(thread_db* tdbb,
 			transaction->tra_save_point->isSystem() &&
 			!transaction->tra_save_point->isChanging())
 		{
+			Savepoint* savepoint = transaction->tra_save_point;
 			// Forget about any undo for this verb
 			transaction->rollforwardSavepoint(tdbb);
+			// Preserve savepoint for reuse
+			fb_assert(savepoint == transaction->tra_save_free);
+			transaction->tra_save_free = savepoint->moveToStack(request->req_savepoints);
+			fb_assert(savepoint != transaction->tra_save_free);
 		}
 	}
 }
 
 
 void EXE_execute_triggers(thread_db* tdbb,
-								trig_vec** triggers,
+								TrigVector** triggers,
 								record_param* old_rpb,
 								record_param* new_rpb,
 								TriggerAction trigger_action, StmtNode::WhichTrigger which_trig)
@@ -1078,7 +1075,7 @@ void EXE_execute_triggers(thread_db* tdbb,
 	jrd_req* const request = tdbb->getRequest();
 	jrd_tra* const transaction = request ? request->req_transaction : tdbb->getTransaction();
 
-	trig_vec* vector = *triggers;
+	TrigVector* vector = *triggers;
 	Record* const old_rec = old_rpb ? old_rpb->rpb_record : NULL;
 	Record* const new_rec = new_rpb ? new_rpb->rpb_record : NULL;
 
@@ -1104,7 +1101,7 @@ void EXE_execute_triggers(thread_db* tdbb,
 
 	try
 	{
-		for (trig_vec::iterator ptr = vector->begin(); ptr != vector->end(); ++ptr)
+		for (TrigVector::iterator ptr = vector->begin(); ptr != vector->end(); ++ptr)
 		{
 			ptr->compile(tdbb);
 
@@ -1270,7 +1267,8 @@ const StmtNode* EXE_looper(thread_db* tdbb, jrd_req* request, const StmtNode* no
 	SET_TDBB(tdbb);
 	Database* dbb = tdbb->getDatabase();
 
-	if (!node || node->kind != DmlNode::KIND_STATEMENT)
+	// ASF: It's already a StmtNode, so do not do a virtual call in execution.
+	if (!node)	/// if (!node || node->getKind() != DmlNode::KIND_STATEMENT
 		BUGCHECK(147);
 
 	// Save the old pool and request to restore on exit

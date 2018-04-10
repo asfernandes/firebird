@@ -48,11 +48,8 @@ namespace Jrd
 {
 	bool Database::onRawDevice() const
 	{
-#ifdef SUPPORT_RAW_DEVICES
-		return PIO_on_raw_device(dbb_filename);
-#else
-		return false;
-#endif
+		const PageSpace* const pageSpace = dbb_page_manager.findPageSpace(DB_PAGE_SPACE);
+		return pageSpace->onRawDevice();
 	}
 
 	string Database::getUniqueFileId() const
@@ -99,14 +96,6 @@ namespace Jrd
 		delete dbb_monitoring_data;
 		delete dbb_backup_manager;
 		delete dbb_crypto_manager;
-
-		while (dbb_active_threads)
-		{
-			thread_db* tdbb = dbb_active_threads;
-			tdbb->deactivate();
-			tdbb->setDatabase(NULL);
-		}
-
 		delete dbb_tip_cache;
 
 		fb_assert(!locked());
@@ -134,14 +123,19 @@ namespace Jrd
 
 	int Database::blocking_ast_sweep(void* ast_object)
 	{
-		Database* dbb = static_cast<Database*>(ast_object);
-		AsyncContextHolder tdbb(dbb, FB_FUNCTION);
-
-		if ((dbb->dbb_flags & DBB_sweep_starting) && !(dbb->dbb_flags & DBB_sweep_in_progress))
+		try
 		{
-			dbb->dbb_flags &= ~DBB_sweep_starting;
-			LCK_release(tdbb, dbb->dbb_sweep_lock);
+			Database* dbb = static_cast<Database*>(ast_object);
+			AsyncContextHolder tdbb(dbb, FB_FUNCTION);
+
+			if ((dbb->dbb_flags & DBB_sweep_starting) && !(dbb->dbb_flags & DBB_sweep_in_progress))
+			{
+				dbb->dbb_flags &= ~DBB_sweep_starting;
+				LCK_release(tdbb, dbb->dbb_sweep_lock);
+			}
 		}
+		catch (const Exception&)
+		{} // no-op
 
 		return 0;
 	}
@@ -235,6 +229,19 @@ namespace Jrd
 			LCK_release(tdbb, dbb_sweep_lock);
 
 		dbb_flags &= ~(DBB_sweep_in_progress | DBB_sweep_starting);
+	}
+
+	void Database::registerModule(Module& module)
+	{
+		Sync sync(&dbb_modules_sync, FB_FUNCTION);
+		sync.lock(SYNC_SHARED);
+		if (dbb_modules.exist(module))
+			return;
+
+		sync.unlock();
+		sync.lock(SYNC_EXCLUSIVE);
+		if (!dbb_modules.exist(module))
+			dbb_modules.add(module);
 	}
 
 	void Database::SharedCounter::shutdown(thread_db* tdbb)

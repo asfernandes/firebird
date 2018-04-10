@@ -41,6 +41,7 @@
 #include "../common/StatusHolder.h"
 #include "../common/classes/RefCounted.h"
 #include "../common/classes/GetPlugins.h"
+#include "../common/classes/RefMutex.h"
 
 #include "firebird/Interface.h"
 
@@ -63,6 +64,8 @@
 #include <zlib.h>
 //#define COMPRESS_DEBUG 1
 #endif // WIRE_COMPRESS_SUPPORT
+
+#define DEB_RBATCH(x)
 
 #define REM_SEND_OFFSET(bs) (0)
 #define REM_RECV_OFFSET(bs) (bs)
@@ -103,6 +106,7 @@ const ULONG MAX_BATCH_CACHE_SIZE = 1024 * 1024; // 1 MB
 // fwd. decl.
 namespace Firebird {
 	class Exception;
+	class BatchCompletionState;
 }
 
 #ifdef WIN_NT
@@ -120,13 +124,14 @@ namespace os_utils
 
 struct rem_port;
 
-typedef Firebird::AutoPtr<UCHAR, Firebird::ArrayDelete<UCHAR> > UCharArrayAutoPtr;
+typedef Firebird::AutoPtr<UCHAR, Firebird::ArrayDelete > UCharArrayAutoPtr;
 
 typedef Firebird::RefPtr<Firebird::IAttachment> ServAttachment;
 typedef Firebird::RefPtr<Firebird::IBlob> ServBlob;
 typedef Firebird::RefPtr<Firebird::ITransaction> ServTransaction;
 typedef Firebird::RefPtr<Firebird::IStatement> ServStatement;
 typedef Firebird::RefPtr<Firebird::IResultSet> ServCursor;
+typedef Firebird::RefPtr<Firebird::IBatch> ServBatch;
 typedef Firebird::RefPtr<Firebird::IRequest> ServRequest;
 typedef Firebird::RefPtr<Firebird::IEvents> ServEvents;
 typedef Firebird::RefPtr<Firebird::IService> ServService;
@@ -257,6 +262,9 @@ public:
 	{
 		if (rbl_self && *rbl_self == this)
 			*rbl_self = NULL;
+
+		if (rbl_iface)
+			rbl_iface->release();
 	}
 
 	static ISC_STATUS badHandle() { return isc_bad_segstr_handle; }
@@ -392,6 +400,9 @@ public:
 	{
 		if (rrq_self && *rrq_self == this)
 			*rrq_self = NULL;
+
+		if (rrq_iface)
+			rrq_iface->release();
 	}
 
 	Rrq* clone() const
@@ -458,6 +469,7 @@ struct Rsr : public Firebird::GlobalStorage, public TypedHandle<rem_type_rsr>
 	Rtr*			rsr_rtr;
 	ServStatement	rsr_iface;
 	ServCursor		rsr_cursor;
+	ServBatch		rsr_batch;
 	rem_fmt*		rsr_bind_format;		// Format of bind message
 	rem_fmt*		rsr_select_format;		// Format of select message
 	rem_fmt*		rsr_user_select_format; // Format of user's select message
@@ -476,7 +488,43 @@ struct Rsr : public Firebird::GlobalStorage, public TypedHandle<rem_type_rsr>
 
 	Firebird::string rsr_cursor_name;	// Name for cursor to be set on open
 	bool			rsr_delayed_format;	// Out format was delayed on execute, set it on fetch
+	unsigned int	rsr_timeout;		// Statement timeout to be set on open\execute
 	Rsr**			rsr_self;
+
+	ULONG			rsr_batch_size;		// Aligned message size for IBatch operations
+	ULONG			rsr_batch_flags;	// Flags for batch processing
+	union								// BatchCS passed to XDR protocol
+	{
+		Firebird::IBatchCompletionState* rsr_batch_ics;	// server
+		Firebird::BatchCompletionState* rsr_batch_cs;	// client
+	};
+
+	struct BatchStream
+	{
+		BatchStream()
+			: curBpb(*getDefaultMemoryPool()), hdrPrevious(0), segmented(false)
+		{ }
+
+		static const ULONG SIZEOF_BLOB_HEAD = sizeof(ISC_QUAD) + 2 * sizeof(ULONG);
+
+		typedef Firebird::HalfStaticArray<UCHAR, 64> Bpb;
+		Bpb curBpb;
+		UCHAR hdr[SIZEOF_BLOB_HEAD];
+		ULONG blobRemaining;			// Remaining to transfer size of blob data
+		ULONG bpbRemaining;				// Remaining to transfer size of BPB
+		ULONG segRemaining;				// Remaining to transfer size of segment data
+		USHORT alignment;				// Alignment in BLOB stream
+		USHORT hdrPrevious;				// Header data left from previous block (in hdr)
+		bool segmented;					// Current blob kind
+
+		void saveData(const UCHAR* data, ULONG size)
+		{
+			fb_assert(size + hdrPrevious <= SIZEOF_BLOB_HEAD);
+			memcpy(&hdr[hdrPrevious], data, size);
+			hdrPrevious += size;
+		}
+	};
+	BatchStream		rsr_batch_stream;
 
 public:
 	// Values for rsr_flags.
@@ -493,18 +541,24 @@ public:
 
 public:
 	Rsr() :
-		rsr_next(0), rsr_rdb(0), rsr_rtr(0), rsr_iface(NULL), rsr_cursor(NULL),
+		rsr_next(0), rsr_rdb(0), rsr_rtr(0), rsr_iface(NULL), rsr_cursor(NULL), rsr_batch(NULL),
 		rsr_bind_format(0), rsr_select_format(0), rsr_user_select_format(0),
 		rsr_format(0), rsr_message(0), rsr_buffer(0), rsr_status(0),
 		rsr_id(0), rsr_fmt_length(0),
 		rsr_rows_pending(0), rsr_msgs_waiting(0), rsr_reorder_level(0), rsr_batch_count(0),
-		rsr_cursor_name(getPool()), rsr_delayed_format(false), rsr_self(NULL)
+		rsr_cursor_name(getPool()), rsr_delayed_format(false), rsr_timeout(0), rsr_self(NULL)
 	{ }
 
 	~Rsr()
 	{
 		if (rsr_self && *rsr_self == this)
 			*rsr_self = NULL;
+
+		if (rsr_cursor)
+			rsr_cursor->release();
+
+		if (rsr_iface)
+			rsr_iface->release();
 
 		delete rsr_status;
 	}
@@ -519,6 +573,7 @@ public:
 	static ISC_STATUS badHandle() { return isc_bad_req_handle; }
 	void checkIface(ISC_STATUS code = isc_unprepared_stmt);
 	void checkCursor();
+	void checkBatch();
 };
 
 
@@ -703,7 +758,7 @@ private:
 	Firebird::UCharBuffer dataForPlugin, dataFromPlugin;
 	Firebird::HalfStaticArray<InternalCryptKey*, 1> cryptKeys;		// Wire crypt keys that came from plugin(s) last time
 	Firebird::string dpbConfig;				// Used to recreate config with new filename
-	Firebird::RefPtr<Config> clntConfig;	// Used to get plugins list and pass to port
+	Firebird::RefPtr<const Config> clntConfig;	// Used to get plugins list and pass to port
 	unsigned nextKey;						// First key to be analyzed
 
 	bool hasCryptKey;						// DPB contains disk crypt key, may be passed only over encrypted wire
@@ -733,7 +788,7 @@ public:
 	Firebird::PathName getPluginName();
 	void tryNewKeys(rem_port*);
 	void releaseKeys(unsigned from);
-	Firebird::RefPtr<Config>* getConfig();
+	Firebird::RefPtr<const Config>* getConfig();
 
 	// Firebird::IClientBlock implementation
 	int release();
@@ -859,6 +914,10 @@ const USHORT PORT_detached		= 0x0100;	// op_detach, op_drop_database or op_servi
 const USHORT PORT_rdb_shutdown	= 0x0200;	// Database is shut down
 const USHORT PORT_connecting	= 0x0400;	// Aux connection waits for a channel to be activated by client
 const USHORT PORT_z_data		= 0x0800;	// Zlib incoming buffer has data left after decompression
+const USHORT PORT_compressed	= 0x1000;	// Compress outgoing stream (does not affect incoming)
+
+// forward decl
+class RemotePortGuard;
 
 // Port itself
 
@@ -918,7 +977,8 @@ struct rem_port : public Firebird::GlobalStorage, public Firebird::RefCounted
 	struct linger	port_linger;		// linger value as defined by SO_LINGER
 	Rdb*			port_context;
 	Thread::Handle	port_events_thread;	// handle of thread, handling incoming events
-	void			(*port_events_shutdown)(rem_port*);	// hack - avoid changing API at beta stage
+	ThreadId		port_events_threadId;
+	RemotePortGuard* port_thread_guard;	// will close port_events_thread in safe way
 #ifdef WIN_NT
 	HANDLE			port_pipe;			// port pipe handle
 	HANDLE			port_event;			// event associated with a port
@@ -946,7 +1006,7 @@ struct rem_port : public Firebird::GlobalStorage, public Firebird::RefCounted
 	OBJCT			port_last_object_id;	// cached last id
 	Firebird::ObjectsArray< Firebird::Array<char> > port_queue;
 	FB_SIZE_T		port_qoffset;			// current packet in the queue
-	Firebird::RefPtr<Config> port_config;	// connection-specific configuration info
+	Firebird::RefPtr<const Config> port_config;	// connection-specific configuration info
 
 	// Authentication and crypt stuff
 	ServerAuthBase*							port_srv_auth;
@@ -985,7 +1045,7 @@ public:
 		port_server(0), port_server_flags(0), port_protocol(0), port_buff_size(rpt / 2),
 		port_flags(0), port_connect_timeout(0), port_dummy_packet_interval(0),
 		port_dummy_timeout(0), port_handle(INVALID_SOCKET), port_channel(INVALID_SOCKET), port_context(0),
-		port_events_thread(0), port_events_shutdown(0),
+		port_events_thread(0), port_events_threadId(0), port_thread_guard(0),
 #ifdef WIN_NT
 		port_pipe(INVALID_HANDLE_VALUE), port_event(INVALID_HANDLE_VALUE),
 #endif
@@ -1022,7 +1082,8 @@ public:
 	static bool checkCompression();
 	void linkParent(rem_port* const parent);
 	void unlinkParent();
-	const Firebird::RefPtr<Config>& getPortConfig() const;
+	Firebird::RefPtr<const Config> getPortConfig();
+	const Firebird::RefPtr<const Config>& getPortConfig() const;
 	void versionInfo(Firebird::string& version) const;
 
 	bool extractNewKeys(CSTRING* to, bool flagPlugList = false)
@@ -1196,6 +1257,13 @@ public:
 	ISC_STATUS	transact_request(P_TRRQ *, PACKET*);
 	SSHORT		asyncReceive(PACKET* asyncPacket, const UCHAR* buffer, SSHORT dataSize);
 	void		start_crypt(P_CRYPT*, PACKET*);
+	void		batch_create(P_BATCH_CREATE*, PACKET*);
+	void		batch_msg(P_BATCH_MSG*, PACKET*);
+	void		batch_blob_stream(P_BATCH_BLOB*, PACKET*);
+	void		batch_regblob(P_BATCH_REGBLOB*, PACKET*);
+	void		batch_exec(P_BATCH_EXEC*, PACKET*);
+	void		batch_rls(P_BATCH_FREE*, PACKET*);
+	void		batch_bpb(P_BATCH_SETBPB*, PACKET*);
 
 	Firebird::string getRemoteId() const;
 	void auxAcceptError(PACKET* packet);
@@ -1205,6 +1273,61 @@ public:
 
 private:
 	bool tryKeyType(const KnownServerKey& srvKey, InternalCryptKey* cryptKey);
+};
+
+
+// Port guard is needed to close events delivery thread in safe way
+class RemotePortGuard
+{
+private:
+	class WaitThread
+	{
+	public:
+		WaitThread(rem_port* async)
+			: asyncPort(async),
+			  waitFlag(false)
+		{ }
+
+		~WaitThread()
+		{
+			if (waitFlag)
+			{
+				Thread::waitForCompletion(waitHandle);
+
+				fb_assert(asyncPort);
+
+				if (asyncPort)
+					asyncPort->release();
+			}
+			else if (asyncPort)
+				asyncPort->port_thread_guard = nullptr;
+		}
+
+		rem_port* asyncPort;
+		Thread::Handle waitHandle;
+		bool waitFlag;
+	};
+
+public:
+	RemotePortGuard(rem_port* port, const char* f)
+		: wThr(port->port_async),
+		  guard(*port->port_sync, f)
+	{
+		if (wThr.asyncPort)
+			wThr.asyncPort->port_thread_guard = this;
+	}
+
+	void setWait(Thread::Handle& handle)
+	{
+		wThr.waitHandle = handle;
+		wThr.waitFlag = true;
+		fb_assert(wThr.asyncPort);
+		wThr.asyncPort->port_thread_guard = nullptr;
+	}
+
+private:
+	WaitThread wThr;
+	Firebird::RefMutexGuard guard;
 };
 
 

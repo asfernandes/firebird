@@ -257,7 +257,7 @@ void Service::getOptions(ClumpletReader& spb)
 			break;
 
 		case isc_spb_address_path:
-			spb.getString(svc_address_path);
+			spb.getData(svc_address_path);
 			{
 				ClumpletReader address_stack(ClumpletReader::UnTagged,
 					spb.getBytes(), spb.getClumpLength());
@@ -567,11 +567,10 @@ unsigned int Service::getAuthBlock(const unsigned char** bytes)
 
 void Service::fillDpb(ClumpletWriter& dpb)
 {
-	const char* providers = "Providers=" CURRENT_ENGINE;
-	dpb.insertString(isc_dpb_config, providers, fb_strlen(providers));
+	dpb.insertString(isc_dpb_config, EMBEDDED_PROVIDERS, fb_strlen(EMBEDDED_PROVIDERS));
 	if (svc_address_path.hasData())
 	{
-		dpb.insertString(isc_dpb_address_path, svc_address_path);
+		dpb.insertData(isc_dpb_address_path, svc_address_path);
 	}
 	if (svc_utf8)
 	{
@@ -728,14 +727,20 @@ Service::Service(const TEXT* service_name, USHORT spb_length, const UCHAR* spb_d
 			{
 				if (svc_auth_block.hasData())
 				{
+					// remote connection - use svc_auth_block
 					PathName dummy;
-					RefPtr<Config> config;
+					RefPtr<const Config> config;
 					expandDatabaseName(svc_expected_db, dummy, &config);
 
+					Mapping mapping(Mapping::MAP_THROW_NOT_FOUND, svc_crypt_callback);
+					mapping.needAuthBlock(svc_auth_block);
+
+					mapping.setAuthBlock(svc_auth_block);
+					mapping.setErrorMessagesContextName("services manager");
+					mapping.setSecurityDbAlias(config->getSecurityDatabase(), nullptr);
+
 					string trusted_role;
-					mapUser(true, svc_username, trusted_role, NULL, &svc_auth_block, NULL,
-						svc_auth_block, "services manager", NULL, config->getSecurityDatabase(),
-						svc_crypt_callback, NULL);
+					mapping.mapUser(svc_username, trusted_role);
 					trusted_role.upper();
 					svc_trusted_role = trusted_role == ADMIN_ROLE;
 				}
@@ -1130,7 +1135,7 @@ ISC_STATUS Service::query2(thread_db* /*tdbb*/,
 				{
 					if (!(info = INF_put_item(isc_spb_dbname,
 											  (USHORT) databases[i].length(),
-											  (const UCHAR*) databases[i].c_str(),
+											  databases[i].c_str(),
 											  info, end)))
 					{
 						return 0;
@@ -1270,8 +1275,7 @@ ISC_STATUS Service::query2(thread_db* /*tdbb*/,
 		case isc_info_svc_server_version:
 			// The version of the server engine
 			{ // scope
-				static const UCHAR* pv = reinterpret_cast<const UCHAR*>(FB_VERSION);
-				info = INF_put_item(item, static_cast<USHORT>(strlen(FB_VERSION)), pv, info, end);
+				info = INF_put_item(item, static_cast<USHORT>(strlen(FB_VERSION)), FB_VERSION, info, end);
 				if (!info) {
 					return 0;
 				}
@@ -1282,8 +1286,7 @@ ISC_STATUS Service::query2(thread_db* /*tdbb*/,
 			// The server implementation - e.g. Firebird/sun4
 			{ // scope
 				string buf2 = DbImplementation::current.implementation();
-				info = INF_put_item(item, buf2.length(),
-									reinterpret_cast<const UCHAR*>(buf2.c_str()), info, end);
+				info = INF_put_item(item, buf2.length(), buf2.c_str(), info, end);
 				if (!info) {
 					return 0;
 				}
@@ -1309,11 +1312,10 @@ ISC_STATUS Service::query2(thread_db* /*tdbb*/,
 			if (svc_user_flag & SVC_user_dba)
 			{
 				// The path to the user security database (security2.fdb)
-				char* pb = reinterpret_cast<char*>(buffer);
-				const RefPtr<Config> defConf(Config::getDefaultConfig());
-				strcpy(pb, defConf->getSecurityDatabase());
+				const RefPtr<const Config> defConf(Config::getDefaultConfig());
+				const char* secDb = defConf->getSecurityDatabase();
 
-				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(pb)), buffer, info, end)))
+				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(secDb)), secDb, info, end)))
 				{
 					return 0;
 				}
@@ -1646,24 +1648,23 @@ void Service::query(USHORT			send_item_length,
 		case isc_info_svc_get_env_msg:
 			if (svc_user_flag & SVC_user_dba)
 			{
-				TEXT PathBuffer[MAXPATHLEN];
+				TEXT pathBuffer[MAXPATHLEN];
 				switch (item)
 				{
 				case isc_info_svc_get_env:
-					gds__prefix(PathBuffer, "");
+					gds__prefix(pathBuffer, "");
 					break;
 				case isc_info_svc_get_env_lock:
-					iscPrefixLock(PathBuffer, "", false);
+					iscPrefixLock(pathBuffer, "", false);
 					break;
 				case isc_info_svc_get_env_msg:
-					gds__prefix_msg(PathBuffer, "");
+					gds__prefix_msg(pathBuffer, "");
 				}
 
 				// Note: it is safe to use strlen to get a length of "buffer"
 				// because gds_prefix[_lock|_msg] return a zero-terminated
 				// string.
-				const UCHAR* pb = reinterpret_cast<const UCHAR*>(PathBuffer);
-				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(PathBuffer)), pb, info, end)))
+				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(pathBuffer)), pathBuffer, info, end)))
 					return;
 			}
 			// Can not return error for service v.1 => simply ignore request
@@ -1763,11 +1764,10 @@ void Service::query(USHORT			send_item_length,
             if (svc_user_flag & SVC_user_dba)
             {
 				// The path to the user security database (security2.fdb)
-				char* pb = reinterpret_cast<char*>(buffer);
-				const RefPtr<Config> defConf(Config::getDefaultConfig());
-				strcpy(pb, defConf->getSecurityDatabase());
+				const RefPtr<const Config> defConf(Config::getDefaultConfig());
+				const char* secDb = defConf->getSecurityDatabase();
 
-				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(pb)), buffer, info, end)))
+				if (!(info = INF_put_item(item, static_cast<USHORT>(strlen(secDb)), secDb, info, end)))
 				{
 					return;
 				}
@@ -2050,7 +2050,7 @@ void Service::start(USHORT spb_length, const UCHAR* spb_data)
 #ifdef DEV_BUILD
 	if (svc_debug)
 	{
-		::printf("%s %s\n", svc_service_run->serv_name, svc_switches.c_str());
+		::fprintf(stderr, "%s %s\n", svc_service_run->serv_name, svc_switches.c_str());
 		return;
 	}
 #endif
@@ -2066,7 +2066,7 @@ void Service::start(USHORT spb_length, const UCHAR* spb_data)
 	// Do not let everyone look at server log
 	if (svc_id == isc_action_svc_get_fb_log && !(svc_user_flag & SVC_user_dba))
     {
-       	status_exception::raise(Arg::Gds(isc_adm_task_denied));
+       	status_exception::raise(Arg::Gds(isc_adm_task_denied) << Arg::Gds(isc_not_dba));
     }
 
 	// Break up the command line into individual arguments.

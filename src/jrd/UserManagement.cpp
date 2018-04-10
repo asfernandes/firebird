@@ -47,12 +47,12 @@ namespace
 		// ILogonInfo implementation
 		const char* name()
 		{
-			return att->att_user->getUserName().c_str();
+			return att->att_user ? att->att_user->getUserName().c_str() : "";
 		}
 
 		const char* role()
 		{
-			return att->att_user->getSqlRole().c_str();
+			return att->att_user ? att->att_user->getSqlRole().c_str() : "";
 		}
 
 		const char* networkProtocol()
@@ -67,6 +67,8 @@ namespace
 
 		const unsigned char* authBlock(unsigned* length)
 		{
+			if (!att->att_user)
+				return NULL;
 			const Auth::AuthenticationBlock& aBlock = att->att_user->usr_auth_block;
 			*length = aBlock.getCount();
 			return aBlock.getCount() ? aBlock.begin() : NULL;
@@ -203,9 +205,7 @@ IManagement* UserManagement::getManager(const char* name)
 		}
 	}
 	if (!plugName.hasData())
-	{
-		(Arg::Gds(isc_random) << "Missing requested management plugin").raise();
-	}
+		Arg::Gds(isc_user_manager).raise();
 
 	// Search for it in cache of already loaded plugins
 	for (unsigned i = 0; i < managers.getCount(); ++i)
@@ -296,7 +296,7 @@ USHORT UserManagement::put(Auth::DynamicUserData* userData)
 	const FB_SIZE_T ret = commands.getCount();
 	if (ret > MAX_USHORT)
 	{
-		status_exception::raise(Arg::Gds(isc_random) << "Too many user management DDL per transaction)");
+		status_exception::raise(Arg::Gds(isc_imp_exc) << Arg::Gds(isc_random) << "Too many user management DDL per transaction");
 	}
 	commands.push(userData);
 	return ret;
@@ -362,12 +362,13 @@ void UserManagement::execute(USHORT id)
 
 		OldAttributes oldAttributes;
 		int ret = manager->execute(&statusWrapper, &cmd, &oldAttributes);
-		checkSecurityResult(ret, &status, command->userName()->get(), command->operation());
+		if (ret == 0 || status.getErrors()[1] != isc_missing_data_structures)
+			checkSecurityResult(ret, &status, command->userName()->get(), command->operation());
+		else
+			statusWrapper.init();
 
 		if (command->op == Auth::ADDMOD_OPER)
-		{
 			command->op = oldAttributes.present ? Auth::MOD_OPER : Auth::ADD_OPER;
-		}
 
 		if (command->attr.entered())
 		{
@@ -384,9 +385,8 @@ void UserManagement::execute(USHORT id)
 			while (cur != curEnd)
 			{
 				if (cur->name == prev)
-				{
 					(Arg::Gds(isc_dup_attribute) << cur->name).raise();
-				}
+
 				prev = cur->name;
 				++cur;
 			}

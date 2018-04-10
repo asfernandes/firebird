@@ -172,13 +172,15 @@ void validatePassword(thread_db* tdbb, const PathName& file, ClumpletWriter& dpb
 	if (ISC_check_if_remote(file, false))	// check for remote connection
 		return;
 	UserId* usr = tdbb->getAttachment()->att_user;
+	if (!usr)
+		return;
 	if (!usr->usr_auth_block.hasData())		// check for embedded attachment
 		return;
 
 	Arg::Gds loginError(isc_login_error);
 
 	// Build list of client/server plugins
-	RefPtr<Config> config;
+	RefPtr<const Config> config;
 	PathName list;
 	expandDatabaseName(file, list /* unused value */, &config);
 	PathName serverList = config->getPlugins(IPluginManager::TYPE_AUTH_SERVER);
@@ -187,8 +189,7 @@ void validatePassword(thread_db* tdbb, const PathName& file, ClumpletWriter& dpb
 
 	if (!list.hasData())
 	{
-		Arg::Gds noPlugins(isc_random);
-		noPlugins << "No matching client/server authentication plugins configured for execute statement in embedded datasource";
+		Arg::Gds noPlugins(isc_vld_plugins);
 		iscLogStatus(NULL, noPlugins.value());
 
 #ifdef DEV_BUILD

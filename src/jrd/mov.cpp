@@ -42,7 +42,7 @@
 
 using namespace Firebird;
 
-int MOV_compare(const dsc* arg1, const dsc* arg2)
+int MOV_compare(Jrd::thread_db* tdbb, const dsc* arg1, const dsc* arg2)
 {
 /**************************************
  *
@@ -55,7 +55,7 @@ int MOV_compare(const dsc* arg1, const dsc* arg2)
  *
  **************************************/
 
-	return CVT2_compare(arg1, arg2);
+	return CVT2_compare(arg1, arg2, tdbb->getAttachment()->att_dec_status);
 }
 
 
@@ -75,44 +75,6 @@ double MOV_date_to_double(const dsc* desc)
 
 	return CVT_date_to_double(desc);
 }
-
-
-#ifdef NOT_USED_OR_REPLACED
-// Strange, I don't see this function surfaced as public.
-void MOV_double_to_date2(double real, dsc* desc)
-{
-/**************************************
- *
- *	M O V _ d o u b l e _ t o _ d a t e 2
- *
- **************************************
- *
- * Functional description
- *	Move a double to one of the many forms of a date
- *
- **************************************/
-	SLONG fixed[2];
-
-	MOV_double_to_date(real, fixed);
-	switch (desc->dsc_dtype)
-	{
-	case dtype_timestamp:
-		((SLONG *) desc->dsc_address)[0] = fixed[0];
-		((SLONG *) desc->dsc_address)[1] = fixed[1];
-		break;
-	case dtype_sql_time:
-		((SLONG *) desc->dsc_address)[0] = fixed[1];
-		break;
-	case dtype_sql_date:
-		((SLONG *) desc->dsc_address)[0] = fixed[0];
-		break;
-	default:
-		fb_assert(FALSE);
-		break;
-	}
-}
-#endif
-
 
 void MOV_double_to_date(double real, SLONG fixed[2])
 {
@@ -140,7 +102,7 @@ bool MOV_get_boolean(const dsc* desc)
 }
 
 
-double MOV_get_double(const dsc* desc)
+double MOV_get_double(Jrd::thread_db* tdbb, const dsc* desc)
 {
 /**************************************
  *
@@ -153,11 +115,11 @@ double MOV_get_double(const dsc* desc)
  *
  **************************************/
 
-	return CVT_get_double(desc, ERR_post);
+	return CVT_get_double(desc, tdbb->getAttachment()->att_dec_status, ERR_post);
 }
 
 
-SLONG MOV_get_long(const dsc* desc, SSHORT scale)
+SLONG MOV_get_long(Jrd::thread_db* tdbb, const dsc* desc, SSHORT scale)
 {
 /**************************************
  *
@@ -171,11 +133,11 @@ SLONG MOV_get_long(const dsc* desc, SSHORT scale)
  *
  **************************************/
 
-	return CVT_get_long(desc, scale, ERR_post);
+	return CVT_get_long(desc, scale, tdbb->getAttachment()->att_dec_status, ERR_post);
 }
 
 
-SINT64 MOV_get_int64(const dsc* desc, SSHORT scale)
+SINT64 MOV_get_int64(Jrd::thread_db* tdbb, const dsc* desc, SSHORT scale)
 {
 /**************************************
  *
@@ -189,11 +151,11 @@ SINT64 MOV_get_int64(const dsc* desc, SSHORT scale)
  *
  **************************************/
 
-	return CVT_get_int64(desc, scale, ERR_post);
+	return CVT_get_int64(desc, scale, tdbb->getAttachment()->att_dec_status, ERR_post);
 }
 
 
-void MOV_get_metaname(const dsc* desc, MetaName& name)
+void MOV_get_metaname(Jrd::thread_db* tdbb, const dsc* desc, MetaName& name)
 {
 /**************************************
  *
@@ -210,17 +172,17 @@ void MOV_get_metaname(const dsc* desc, MetaName& name)
 	USHORT ttype;
 	UCHAR* ptr = NULL;
 
-	const USHORT length = CVT_get_string_ptr(desc, &ttype, &ptr, NULL, 0);
+	const USHORT length = CVT_get_string_ptr(desc, &ttype, &ptr, NULL, 0, tdbb->getAttachment()->att_dec_status);
 
 	fb_assert(length && ptr);
 	fb_assert(length <= MAX_SQL_IDENTIFIER_LEN);
-	fb_assert(ttype == ttype_metadata);
+	fb_assert(ttype == ttype_ascii || ttype == ttype_metadata);
 
 	name.assign(reinterpret_cast<char*>(ptr), length);
 }
 
 
-SQUAD MOV_get_quad(const dsc* desc, SSHORT scale)
+SQUAD MOV_get_quad(Jrd::thread_db* tdbb, const dsc* desc, SSHORT scale)
 {
 /**************************************
  *
@@ -234,11 +196,12 @@ SQUAD MOV_get_quad(const dsc* desc, SSHORT scale)
  *
  **************************************/
 
-	return CVT_get_quad(desc, scale, ERR_post);
+	return CVT_get_quad(desc, scale, tdbb->getAttachment()->att_dec_status, ERR_post);
 }
 
 
-int MOV_get_string_ptr(const dsc* desc,
+int MOV_get_string_ptr(Jrd::thread_db* tdbb,
+					   const dsc* desc,
 					   USHORT* ttype,
 					   UCHAR** address, vary* temp, USHORT length)
 {
@@ -259,11 +222,11 @@ int MOV_get_string_ptr(const dsc* desc,
  *
  **************************************/
 
-	return CVT_get_string_ptr(desc, ttype, address, temp, length);
+	return CVT_get_string_ptr(desc, ttype, address, temp, length, tdbb->getAttachment()->att_dec_status);
 }
 
 
-int MOV_get_string(const dsc* desc, UCHAR** address, vary* temp, USHORT length)
+int MOV_get_string(Jrd::thread_db* tdbb, const dsc* desc, UCHAR** address, vary* temp, USHORT length)
 {
 /**************************************
  *
@@ -276,7 +239,7 @@ int MOV_get_string(const dsc* desc, UCHAR** address, vary* temp, USHORT length)
  **************************************/
 	USHORT ttype;
 
-	return MOV_get_string_ptr(desc, &ttype, address, temp, length);
+	return MOV_get_string_ptr(tdbb, desc, &ttype, address, temp, length);
 }
 
 
@@ -331,7 +294,8 @@ GDS_TIMESTAMP MOV_get_timestamp(const dsc* desc)
 }
 
 
-int MOV_make_string(const dsc*	     desc,
+int MOV_make_string(Jrd::thread_db* tdbb,
+					const dsc*	 desc,
 					USHORT	     ttype,
 					const char** address,
 					vary*	     temp,
@@ -356,7 +320,7 @@ int MOV_make_string(const dsc*	     desc,
  *
  **************************************/
 
-	return CVT_make_string(desc, ttype, address, temp, length, ERR_post);
+	return CVT_make_string(desc, ttype, address, temp, length, tdbb->getAttachment()->att_dec_status, ERR_post);
 }
 
 
@@ -418,7 +382,7 @@ int MOV_make_string2(Jrd::thread_db* tdbb,
 		return size;
 	}
 
-	return CVT2_make_string2(desc, ttype, address, buffer);
+	return CVT2_make_string2(desc, ttype, address, buffer, tdbb->getAttachment()->att_dec_status);
 }
 
 
@@ -446,7 +410,143 @@ void MOV_move(Jrd::thread_db* tdbb, /*const*/ dsc* from, dsc* to)
  **************************************/
 
 	if (DTYPE_IS_BLOB_OR_QUAD(from->dsc_dtype) || DTYPE_IS_BLOB_OR_QUAD(to->dsc_dtype))
-		Jrd::blb::move(tdbb, from, to, NULL);
+		Jrd::blb::move(tdbb, from, to);
 	else
-		CVT_move(from, to);
+		CVT_move(from, to, tdbb->getAttachment()->att_dec_status);
 }
+
+
+void MOV_move_ext(Jrd::thread_db* tdbb, /*const*/ dsc* from, dsc* to, bool toExtern)
+{
+/**************************************
+ *
+ *	M O V _ m o v e _ e x t
+ *
+ **************************************
+ *
+ * Functional description
+ *	Move data to/from outer world.
+ *
+ **************************************/
+
+	MOV_move(tdbb, from, to);
+
+	switch (to->dsc_dtype)
+	{
+	case dtype_dec_fixed:
+		if (toExtern)
+		{
+			((Decimal128*) to->dsc_address)->setScale(tdbb->getAttachment()->att_dec_status,
+				to->dsc_scale);
+		}
+		else
+		{
+			((DecimalFixed*) to->dsc_address)->exactInt(tdbb->getAttachment()->att_dec_status,
+				to->dsc_scale);
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+
+Decimal64 MOV_get_dec64(Jrd::thread_db* tdbb, const dsc* desc)
+{
+/**************************************
+ *
+ *	M O V _ g e t _ d e c 6 4
+ *
+ **************************************/
+
+	return CVT_get_dec64(desc, tdbb->getAttachment()->att_dec_status, ERR_post);
+}
+
+
+Decimal128 MOV_get_dec128(Jrd::thread_db* tdbb, const dsc* desc)
+{
+/**************************************
+ *
+ *	M O V _ g e t _ d e c 1 2 8
+ *
+ **************************************/
+
+	return CVT_get_dec128(desc, tdbb->getAttachment()->att_dec_status, ERR_post);
+}
+
+
+DecimalFixed MOV_get_dec_fixed(Jrd::thread_db* tdbb, const dsc* desc, SSHORT scale)
+{
+/**************************************
+ *
+ *	M O V _ g e t _ d e c _ f i x e d
+ *
+ **************************************/
+
+	return CVT_get_dec_fixed(desc, scale, tdbb->getAttachment()->att_dec_status, ERR_post);
+}
+
+
+namespace Jrd
+{
+
+DescPrinter::DescPrinter(thread_db* tdbb, const dsc* desc, int mLen)
+	: maxLen(mLen)
+{
+	const char* const NULL_KEY_STRING = "NULL";
+
+	if (!desc)
+	{
+		value = NULL_KEY_STRING;
+		return;
+	}
+
+	fb_assert(!desc->isBlob());
+
+	value = MOV_make_string2(tdbb, desc, ttype_dynamic);
+
+	const int len = (int) value.length();
+	const char* const str = value.c_str();
+
+	if (desc->isText() || desc->isDateTime())
+	{
+		if (desc->dsc_dtype == dtype_text)
+		{
+			const char* const pad = (desc->dsc_sub_type == ttype_binary) ? "\0" : " ";
+			value.rtrim(pad);
+		}
+
+		if (desc->isText() && desc->getTextType() == ttype_binary)
+		{
+			Firebird::string hex;
+			char* s = hex.getBuffer(2 * len);
+
+			for (int i = 0; i < len; i++)
+			{
+				sprintf(s, "%02X", (int)(unsigned char) str[i]);
+				s += 2;
+			}
+
+			value = "x'" + hex + "'";
+		}
+		else
+			value = "'" + value + "'";
+	}
+
+	if (value.length() > maxLen)
+	{
+		fb_assert(desc->isText());
+
+		value.resize(maxLen);
+
+		const CharSet* const cs = INTL_charset_lookup(tdbb, desc->getCharSet());
+
+		while (value.hasData() && !cs->wellFormed(value.length(), (const UCHAR*) value.c_str()))
+			value.resize(value.length() - 1);
+
+		value += "...";
+	}
+}
+
+}	// namespace Jrd

@@ -162,10 +162,10 @@ namespace
 				csb->csb_rpt[*iter].deactivate();
 		}
 
-		bool isReferenced(const ExprNode* node) const
+		bool isReferenced(CompilerScratch* csb, const ExprNode* node) const
 		{
 			SortedStreamList nodeStreams;
-			node->collectStreams(nodeStreams);
+			node->collectStreams(csb, nodeStreams);
 
 			if (!nodeStreams.hasData())
 				return false;
@@ -212,6 +212,7 @@ namespace
 				BoolExprNode* const node = tail->opt_conjunct_node;
 
 				if (!(tail->opt_conjunct_flags & opt_conjunct_used) &&
+					!(node->nodFlags & ExprNode::FLAG_RESIDUAL) &&
 					node->computable(csb, INVALID_STREAM, false))
 				{
 					compose(csb->csb_pool, &boolean, node);
@@ -247,7 +248,7 @@ namespace
 
 			if (riverCount == 1)
 			{
-				River* const sub_river = rivers.front();
+				River* const sub_river = rivers.pop();
 				m_rsb = sub_river->getRecordSource();
 			}
 			else
@@ -256,52 +257,30 @@ namespace
 
 				// Reorder input rivers according to their possible inter-dependencies
 
-				while (rsbs.getCount() < riverCount)
+				while (rivers.hasData())
 				{
-					bool added = false;
-
 					for (River** iter = rivers.begin(); iter < rivers.end(); iter++)
 					{
 						River* const sub_river = *iter;
 						RecordSource* const sub_rsb = sub_river->getRecordSource();
 
-						if (!rsbs.exist(sub_rsb) && sub_river->isComputable(csb))
+						fb_assert(!rsbs.exist(sub_rsb));
+
+						sub_river->activate(csb);
+
+						if (sub_river->isComputable(csb))
 						{
-							added = true;
 							rsbs.add(sub_rsb);
-							sub_river->activate(csb);
+							rivers.remove(iter);
+							break;
 						}
-					}
 
-					if (!added)
-						break;
-				}
-
-				if (rsbs.getCount() < riverCount)
-				{
-					// Ideally, we should never get here. Now it's possible only if some booleans
-					// were faked to be non-computable (FLAG_DEOPTIMIZE and FLAG_RESIDUAL).
-
-					for (River** iter = rivers.begin(); iter < rivers.end(); iter++)
-					{
-						River* const sub_river = *iter;
-						RecordSource* const sub_rsb = sub_river->getRecordSource();
-
-						const FB_SIZE_T pos = iter - rivers.begin();
-
-						if (!rsbs.exist(sub_rsb))
-							rsbs.insert(pos, sub_rsb);
+						sub_river->deactivate(csb);
 					}
 				}
 
-				fb_assert(rsbs.getCount() == riverCount);
-
-				m_rsb = FB_NEW_POOL(csb->csb_pool) NestedLoopJoin(csb, riverCount, rsbs.begin());
+				m_rsb = FB_NEW_POOL(csb->csb_pool) NestedLoopJoin(csb, rsbs.getCount(), rsbs.begin());
 			}
-
-			// Clear the input rivers list
-
-			rivers.clear();
 		}
 	};
 } // namespace
@@ -309,9 +288,8 @@ namespace
 static bool augment_stack(ValueExprNode*, ValueExprNodeStack&);
 static bool augment_stack(BoolExprNode*, BoolExprNodeStack&);
 static void check_indices(const CompilerScratch::csb_repeat*);
-static void check_sorts(RseNode*);
+static void check_sorts(CompilerScratch*, RseNode*);
 static void class_mask(USHORT, ValueExprNode**, ULONG*);
-static bool check_for_nod_from(const ValueExprNode*);
 static SLONG decompose(thread_db* tdbb, BoolExprNode* boolNode, BoolExprNodeStack& stack,
 	CompilerScratch* csb);
 static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratch* csb,
@@ -416,7 +394,10 @@ static const UCHAR sort_dtypes[] =
 	0,							// dtype_array
 	SKD_int64,					// dtype_int64
 	SKD_text,					// dtype_dbkey - use text sort for backward compatibility
-	SKD_bytes					// dtype_boolean
+	SKD_bytes,					// dtype_boolean
+	SKD_dec64,					// dtype_dec64
+	SKD_dec128,					// dtype_dec128
+	SKD_dec128					// dtype_dec_fixed
 };
 
 
@@ -486,7 +467,7 @@ RecordSource* OPT_compile(thread_db* tdbb, CompilerScratch* csb, RseNode* rse,
 
 	RiverList rivers;
 
-	check_sorts(rse);
+	check_sorts(csb, rse);
 	SortNode* sort = rse->rse_sorted;
 	SortNode* project = rse->rse_projection;
 	SortNode* aggregate = rse->rse_aggregate;
@@ -536,7 +517,7 @@ RecordSource* OPT_compile(thread_db* tdbb, CompilerScratch* csb, RseNode* rse,
 		{
 			BoolExprNode* const node = iter.object();
 
-			if (rse->rse_jointype != blr_inner && node->possiblyUnknown())
+			if (rse->rse_jointype != blr_inner && node->possiblyUnknown(opt))
 			{
 				// parent missing conjunctions shouldn't be
 				// distributed to FULL OUTER JOIN streams at all
@@ -753,9 +734,8 @@ RecordSource* OPT_compile(thread_db* tdbb, CompilerScratch* csb, RseNode* rse,
 				// Generate one river which holds a cross join rsb between
 				// all currently available rivers
 
-				River* const river = FB_NEW_POOL(*pool) CrossJoin(csb, rivers);
-				river->activate(csb);
-				rivers.add(river);
+				rivers.add(FB_NEW_POOL(*pool) CrossJoin(csb, rivers));
+				rivers.back()->activate(csb);
 			}
 			else
 			{
@@ -1020,7 +1000,7 @@ static void check_indices(const CompilerScratch::csb_repeat* csb_tail)
 }
 
 
-static void check_sorts(RseNode* rse)
+static void check_sorts(CompilerScratch* csb, RseNode* rse)
 {
 /**************************************
  *
@@ -1138,8 +1118,8 @@ static void check_sorts(RseNode* rse)
 
 			for (; project_ptr != project_end; ++project_ptr)
 			{
-				const FieldNode* sortField = (*sort_ptr)->as<FieldNode>();
-				const FieldNode* projectField = (*project_ptr)->as<FieldNode>();
+				const FieldNode* sortField = nodeAs<FieldNode>(*sort_ptr);
+				const FieldNode* projectField = nodeAs<FieldNode>(*project_ptr);
 
 				if (sortField && projectField &&
 					sortField->fieldStream == projectField->fieldStream &&
@@ -1178,7 +1158,7 @@ static void check_sorts(RseNode* rse)
 		{
 			const FieldNode* sortField;
 
-			if ((sortField = (*sort_ptr)->as<FieldNode>()))
+			if ((sortField = nodeAs<FieldNode>(*sort_ptr)))
 			{
 				// Get stream for this field at this position.
 				const StreamType current_stream = sortField->fieldStream;
@@ -1207,7 +1187,7 @@ static void check_sorts(RseNode* rse)
 				// This position doesn't use a simple field, thus we should
 				// check the expression internals.
 				SortedStreamList streams;
-				(*sort_ptr)->collectStreams(streams);
+				(*sort_ptr)->collectStreams(csb, streams);
 
 				// We can use this sort only if there's a single stream
 				// referenced by the expression.
@@ -1335,29 +1315,6 @@ static void class_mask(USHORT count, ValueExprNode** eq_class, ULONG* mask)
 }
 
 
-static bool check_for_nod_from(const ValueExprNode* node)
-{
-/**************************************
- *
- *	c h e c k _ f o r _ n o d _ f r o m
- *
- **************************************
- *
- * Functional description
- *	Check for nod_from under >=0 CastNode nodes.
- *
- **************************************/
-	const CastNode* castNode;
-	const SubQueryNode* subQueryNode;
-
-	if ((castNode = node->as<CastNode>()))
-		return check_for_nod_from(castNode->source);
-	else if ((subQueryNode = node->as<SubQueryNode>()) && subQueryNode->blrOp == blr_via)
-		return true;
-
-	return false;
-}
-
 static SLONG decompose(thread_db* tdbb, BoolExprNode* boolNode, BoolExprNodeStack& stack,
 	CompilerScratch* csb)
 {
@@ -1373,8 +1330,8 @@ static SLONG decompose(thread_db* tdbb, BoolExprNode* boolNode, BoolExprNodeStac
  **************************************/
 	DEV_BLKCHK(csb, type_csb);
 
-	BinaryBoolNode* binaryNode = boolNode->as<BinaryBoolNode>();
-	ComparativeBoolNode* cmpNode = boolNode->as<ComparativeBoolNode>();
+	BinaryBoolNode* binaryNode = nodeAs<BinaryBoolNode>(boolNode);
+	ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(boolNode);
 
 	if (binaryNode)
 	{
@@ -1427,14 +1384,6 @@ static SLONG decompose(thread_db* tdbb, BoolExprNode* boolNode, BoolExprNodeStac
 
 		if (cmpNode->blrOp == blr_between)
 		{
-			if (check_for_nod_from(cmpNode->arg1))
-			{
-				// Without this ERR_punt(), server was crashing with sub queries
-				// under "between" predicate, Bug No. 73766
-				ERR_post(Arg::Gds(isc_optimizer_between_err));
-				// Msg 493: Unsupported field type specified in BETWEEN predicate
-			}
-
 			ComparativeBoolNode* newCmpNode = FB_NEW_POOL(csb->csb_pool) ComparativeBoolNode(
 				csb->csb_pool, blr_geq);
 			newCmpNode->arg1 = cmpNode->arg1;
@@ -1496,7 +1445,16 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
  *		operation '$'.
  *
  **************************************/
-	/*thread_db* tdbb = */JRD_get_thread_data();
+
+	// dimitr:	Dumb protection against too many injected conjuncts (see CORE-5381).
+	//			Don't produce more additional conjuncts than we originally had
+	//			(i.e. this routine should never more than double the number of conjuncts).
+	//			Ideally, we need two separate limits here:
+	//				1) number of injected conjuncts (affects required impure size)
+	//				2) number of input conjuncts (affects search time inside this routine)
+
+	if (base_count * 2 > MAX_CONJUNCTS)
+		return 0;
 
 	ObjectsArray<ValueExprNodeStack> classes;
 	ObjectsArray<ValueExprNodeStack>::iterator eq_class;
@@ -1505,24 +1463,24 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 
 	// Zip thru stack of booleans looking for field equalities
 
-	for (BoolExprNodeStack::iterator stack1(org_stack); stack1.hasData(); ++stack1)
+	for (BoolExprNodeStack::iterator iter(org_stack); iter.hasData(); ++iter)
 	{
-		BoolExprNode* boolean = stack1.object();
+		BoolExprNode* const boolean = iter.object();
 
 		if (boolean->nodFlags & ExprNode::FLAG_DEOPTIMIZE)
 			continue;
 
-		ComparativeBoolNode* cmpNode = boolean->as<ComparativeBoolNode>();
+		ComparativeBoolNode* const cmpNode = nodeAs<ComparativeBoolNode>(boolean);
 
 		if (!cmpNode || cmpNode->blrOp != blr_eql)
 			continue;
 
-		ValueExprNode* node1 = cmpNode->arg1;
-		if (!node1->is<FieldNode>())
+		ValueExprNode* const node1 = cmpNode->arg1;
+		if (!nodeIs<FieldNode>(node1))
 			continue;
 
-		ValueExprNode* node2 = cmpNode->arg2;
-		if (!node2->is<FieldNode>())
+		ValueExprNode* const node2 = cmpNode->arg2;
+		if (!nodeIs<FieldNode>(node2))
 			continue;
 
 		for (eq_class = classes.begin(); eq_class != classes.end(); ++eq_class)
@@ -1548,7 +1506,7 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 		}
 	}
 
-	if (classes.getCount() == 0)
+	if (classes.isEmpty())
 		return 0;
 
 	// Make another pass looking for any equality relationships that may have crept
@@ -1556,12 +1514,12 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 
 	for (eq_class = classes.begin(); eq_class != classes.end(); ++eq_class)
 	{
-		for (ValueExprNodeStack::const_iterator stack2(*eq_class); stack2.hasData(); ++stack2)
+		for (ValueExprNodeStack::const_iterator iter(*eq_class); iter.hasData(); ++iter)
 		{
 			for (ObjectsArray<ValueExprNodeStack>::iterator eq_class2(eq_class);
 				 ++eq_class2 != classes.end();)
 			{
-				if (search_stack(stack2.object(), *eq_class2))
+				if (search_stack(iter.object(), *eq_class2))
 				{
 					while (eq_class2->hasData())
 						augment_stack(eq_class2->pop(), *eq_class);
@@ -1582,15 +1540,19 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 			{
 				for (ValueExprNodeStack::iterator inner(outer); (++inner).hasData(); )
 				{
-					ComparativeBoolNode* cmpNode =
-						FB_NEW_POOL(csb->csb_pool) ComparativeBoolNode(csb->csb_pool, blr_eql);
-					cmpNode->arg1 = outer.object();
-					cmpNode->arg2 = inner.object();
+					if (count < base_count)
+					{
+						AutoPtr<ComparativeBoolNode> cmpNode(FB_NEW_POOL(csb->csb_pool)
+							ComparativeBoolNode(csb->csb_pool, blr_eql));
+						cmpNode->arg1 = outer.object();
+						cmpNode->arg2 = inner.object();
 
-					if ((base_count + count < MAX_CONJUNCTS) && augment_stack(cmpNode, org_stack))
-						count++;
-					else
-						delete cmpNode;
+						if (augment_stack(cmpNode, org_stack))
+						{
+							count++;
+							cmpNode.release();
+						}
+					}
 				}
 			}
 		}
@@ -1598,10 +1560,10 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 
 	// Now make a second pass looking for non-field equalities
 
-	for (BoolExprNodeStack::iterator stack3(org_stack); stack3.hasData(); ++stack3)
+	for (BoolExprNodeStack::iterator iter(org_stack); iter.hasData(); ++iter)
 	{
-		BoolExprNode* boolean = stack3.object();
-		ComparativeBoolNode* cmpNode = boolean->as<ComparativeBoolNode>();
+		BoolExprNode* const boolean = iter.object();
+		ComparativeBoolNode* const cmpNode = nodeAs<ComparativeBoolNode>(boolean);
 		ValueExprNode* node1;
 		ValueExprNode* node2;
 
@@ -1619,7 +1581,7 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 
 		bool reverse = false;
 
-		if (!node1->is<FieldNode>())
+		if (!nodeIs<FieldNode>(node1))
 		{
 			ValueExprNode* swap_node = node1;
 			node1 = node2;
@@ -1627,10 +1589,10 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 			reverse = true;
 		}
 
-		if (!node1->is<FieldNode>())
+		if (!nodeIs<FieldNode>(node1))
 			continue;
 
-		if (!node2->is<LiteralNode>() && !node2->is<ParameterNode>() && !node2->is<VariableNode>())
+		if (!nodeIs<LiteralNode>(node2) && !nodeIs<ParameterNode>(node2) && !nodeIs<VariableNode>(node2))
 			continue;
 
 		for (eq_class = classes.begin(); eq_class != classes.end(); ++eq_class)
@@ -1639,7 +1601,7 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 			{
 				for (ValueExprNodeStack::iterator temp(*eq_class); temp.hasData(); ++temp)
 				{
-					if (!node_equality(node1, temp.object()))
+					if (!node_equality(node1, temp.object()) && count < base_count)
 					{
 						ValueExprNode* arg1;
 						ValueExprNode* arg2;
@@ -1656,10 +1618,13 @@ static USHORT distribute_equalities(BoolExprNodeStack& org_stack, CompilerScratc
 						}
 
 						// From the conjuncts X(A,B) and A=C, infer the conjunct X(C,B)
-						BoolExprNode* newNode = make_inference_node(csb, boolean, arg1, arg2);
+						AutoPtr<BoolExprNode> newNode(make_inference_node(csb, boolean, arg1, arg2));
 
-						if ((base_count + count < MAX_CONJUNCTS) && augment_stack(newNode, org_stack))
+						if (augment_stack(newNode, org_stack))
+						{
 							++count;
+							newNode.release();
+						}
 					}
 				}
 
@@ -1919,7 +1884,7 @@ void OPT_gen_aggregate_distincts(thread_db* tdbb, CompilerScratch* csb, MapNode*
 	for (const NestConst<ValueExprNode>* const end = map->sourceList.end(); ptr != end; ++ptr)
 	{
 		ValueExprNode* from = *ptr;
-		AggNode* aggNode = from->as<AggNode>();
+		AggNode* aggNode = nodeAs<AggNode>(from);
 
 		if (aggNode && aggNode->distinct)
 		{
@@ -1938,39 +1903,36 @@ void OPT_gen_aggregate_distincts(thread_db* tdbb, CompilerScratch* csb, MapNode*
 				desc->getTextType() != ttype_binary && desc->getTextType() != ttype_ascii;
 
 			sort_key_def* sort_key = asb->keyItems.getBuffer(asb->intl ? 2 : 1);
-			sort_key->skd_offset = 0;
+			sort_key->setSkdOffset();
 
 			if (asb->intl)
 			{
 				const USHORT key_length = ROUNDUP(INTL_key_length(tdbb,
 					INTL_TEXT_TO_INDEX(desc->getTextType()), desc->getStringLength()), sizeof(SINT64));
 
-				sort_key->skd_dtype = SKD_bytes;
+				sort_key->setSkdLength(SKD_bytes, key_length);
 				sort_key->skd_flags = SKD_ascending;
-				sort_key->skd_length = key_length;
-				sort_key->skd_offset = 0;
 				sort_key->skd_vary_offset = 0;
 
 				++sort_key;
-				asb->length = sort_key->skd_offset = key_length;
+				sort_key->setSkdOffset(&sort_key[-1]);
+				asb->length = sort_key->getSkdOffset();
 			}
 
 			fb_assert(desc->dsc_dtype < FB_NELEM(sort_dtypes));
-			sort_key->skd_dtype = sort_dtypes[desc->dsc_dtype];
+			sort_key->setSkdLength(sort_dtypes[desc->dsc_dtype], desc->dsc_length);
 
 			if (!sort_key->skd_dtype)
 				ERR_post(Arg::Gds(isc_invalid_sort_datatype) << Arg::Str(DSC_dtype_tostring(desc->dsc_dtype)));
 
-			sort_key->skd_length = desc->dsc_length;
-
 			if (desc->dsc_dtype == dtype_varying)
 			{
 				// allocate space to store varying length
-				sort_key->skd_vary_offset = sort_key->skd_offset + ROUNDUP(desc->dsc_length, sizeof(SLONG));
+				sort_key->skd_vary_offset = sort_key->getSkdOffset() + ROUNDUP(desc->dsc_length, sizeof(SLONG));
 				asb->length = sort_key->skd_vary_offset + sizeof(USHORT);
 			}
 			else
-				asb->length += sort_key->skd_length;
+				asb->length += sort_key->getSkdLength();
 
 			asb->length = ROUNDUP(asb->length, sizeof(SLONG));
 			// dimitr:	allocate an extra longword for the purely artificial counter,
@@ -2319,10 +2281,14 @@ static RecordSource* gen_retrieval(thread_db*     tdbb,
 			inversion = candidate->inversion;
 			condition = candidate->condition;
 
+			// Just for safety sake, this condition must be already checked
+			// inside OptimizerRetrieval::matchOnIndexes()
+
 			if (inversion && condition &&
 				(!condition->computable(csb, INVALID_STREAM, false) ||
-				condition->findStream(stream)))
+				condition->findStream(csb, stream)))
 			{
+				fb_assert(false);
 				inversion = NULL;
 				condition = NULL;
 			}
@@ -2355,6 +2321,7 @@ static RecordSource* gen_retrieval(thread_db*     tdbb,
 			BoolExprNode* node = tail->opt_conjunct_node;
 
 			if (!(tail->opt_conjunct_flags & opt_conjunct_used) &&
+				!(node->nodFlags & ExprNode::FLAG_RESIDUAL) &&
 				node->computable(csb, INVALID_STREAM, false))
 			{
 				compose(*tdbb->getDefaultPool(), return_boolean, node);
@@ -2379,6 +2346,7 @@ static RecordSource* gen_retrieval(thread_db*     tdbb,
 		BoolExprNode* const node = tail->opt_conjunct_node;
 
 		if (!(tail->opt_conjunct_flags & opt_conjunct_used) &&
+			!(node->nodFlags & ExprNode::FLAG_RESIDUAL) &&
 			node->computable(csb, INVALID_STREAM, false))
 		{
 			// If inversion is available, utilize all conjuncts that refer to
@@ -2386,7 +2354,7 @@ static RecordSource* gen_retrieval(thread_db*     tdbb,
 			// that are local to this stream. The remaining ones are left in piece
 			// as possible candidates for a merge/hash join.
 
-			if ((inversion && node->findStream(stream)) ||
+			if ((inversion && node->findStream(csb, stream)) ||
 				(!inversion && node->computable(csb, stream, true)))
 			{
 				compose(*tdbb->getDefaultPool(), &boolean, node);
@@ -2482,7 +2450,7 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 					 node_ptr != end_node;
 					 ++node_ptr)
 				{
-					FieldNode* fieldNode = (*node_ptr)->as<FieldNode>();
+					FieldNode* fieldNode = nodeAs<FieldNode>(*node_ptr);
 
 					if (fieldNode && fieldNode->fieldStream == *ptr && fieldNode->fieldId == id)
 					{
@@ -2490,7 +2458,8 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 						fieldNode->getDesc(tdbb, csb, desc);
 
 						// International type text has a computed key
-						if (IS_INTL_DATA(desc))
+						// Different decimal float values sometimes have same keys
+						if (IS_INTL_DATA(desc) || desc->isDecFloat())
 							break;
 
 						--items;
@@ -2514,7 +2483,7 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 	if (sort->unique)
 		map->flags |= SortedStream::FLAG_UNIQUE;
 
-    ULONG map_length = 0;
+    sort_key_def* prev_key = nullptr;
 
 	// Loop thru sort keys building sort keys.  Actually, to handle null values
 	// correctly, two sort keys are made for each field, one for the null flag
@@ -2522,12 +2491,12 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 
 	SortedStream::SortMap::Item* map_item = map->items.getBuffer(items);
 	sort_key_def* sort_key = map->keyItems.getBuffer(2 * sort->expressions.getCount());
-	int* nullOrder = sort->nullOrder.begin();
-	const bool* descending = sort->descending.begin();
+	const SortDirection* direction = sort->direction.begin();
+	const NullsPlacement* nullOrder = sort->nullOrder.begin();
 
 	for (NestConst<ValueExprNode>* node_ptr = sort->expressions.begin();
 		 node_ptr != end_node;
-		 ++node_ptr, ++nullOrder, ++descending, ++map_item)
+		 ++node_ptr, ++nullOrder, ++direction, ++map_item)
 	{
 		// Pick up sort key expression.
 
@@ -2555,37 +2524,25 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 		}
 
 		// Make key for null flag
+		sort_key->setSkdLength(SKD_text, 1);
+		sort_key->setSkdOffset(prev_key);
 
-#ifndef WORDS_BIGENDIAN
-		map_length = ROUNDUP(map_length, sizeof(SLONG));
-#endif
-		const ULONG flag_offset = map_length++;
-		sort_key->skd_offset = flag_offset;
-		sort_key->skd_dtype = SKD_text;
-		sort_key->skd_length = 1;
 		// Handle nulls placement
 		sort_key->skd_flags = SKD_ascending;
 
 		// Have SQL-compliant nulls ordering for ODS11+
-		if ((*nullOrder == rse_nulls_default && !*descending) || *nullOrder == rse_nulls_first)
+		if ((*nullOrder == NULLS_DEFAULT && *direction != ORDER_DESC) || *nullOrder == NULLS_FIRST)
 			sort_key->skd_flags |= SKD_descending;
 
-		++sort_key;
+		prev_key = sort_key++;
 
 		// Make key for sort key proper
-#ifndef WORDS_BIGENDIAN
-		map_length = ROUNDUP(map_length, sizeof(SLONG));
-#else
-		if (desc->dsc_dtype >= dtype_aligned)
-			map_length = FB_ALIGN(map_length, type_alignments[desc->dsc_dtype]);
-#endif
-
-		sort_key->skd_offset = map_length;
-		sort_key->skd_flags = SKD_ascending;
-		if (*descending)
-			sort_key->skd_flags |= SKD_descending;
 		fb_assert(desc->dsc_dtype < FB_NELEM(sort_dtypes));
-		sort_key->skd_dtype = sort_dtypes[desc->dsc_dtype];
+		sort_key->setSkdLength(sort_dtypes[desc->dsc_dtype], desc->dsc_length);
+		sort_key->setSkdOffset(&sort_key[-1], desc);
+		sort_key->skd_flags = SKD_ascending;
+		if (*direction == ORDER_DESC)
+			sort_key->skd_flags |= SKD_descending;
 
 		if (!sort_key->skd_dtype)
 			ERR_post(Arg::Gds(isc_invalid_sort_datatype) << Arg::Str(DSC_dtype_tostring(desc->dsc_dtype)));
@@ -2596,25 +2553,25 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 				sort_key->skd_flags |= SKD_binary;
 		}
 
-		sort_key->skd_length = desc->dsc_length;
-		++sort_key;
 		map_item->clear();
 		map_item->node = node;
-		map_item->flagOffset = flag_offset;
+		map_item->flagOffset = prev_key->getSkdOffset();
 		map_item->desc = *desc;
-		map_item->desc.dsc_address = (UCHAR*)(IPTR) map_length;
-		map_length += desc->dsc_length;
+		map_item->desc.dsc_address = (UCHAR*)(IPTR) sort_key->getSkdOffset();
+
+		prev_key = sort_key++;
 
 		FieldNode* fieldNode;
 
-		if ((fieldNode = node->as<FieldNode>()))
+		if ((fieldNode = nodeAs<FieldNode>(node)))
 		{
 			map_item->stream = fieldNode->fieldStream;
 			map_item->fieldId = fieldNode->fieldId;
 		}
 	}
 
-	map_length = ROUNDUP(map_length, sizeof(SLONG));
+	fb_assert(prev_key);
+	ULONG map_length = prev_key ? ROUNDUP(prev_key->getSkdOffset() + prev_key->getSkdLength(), sizeof(SLONG)) : 0;
 	map->keyLength = map_length;
 	ULONG flag_offset = map_length;
 	map_length += stream_list.getCount();
@@ -2632,6 +2589,7 @@ SortedStream* OPT_gen_sort(thread_db* tdbb, CompilerScratch* csb, const StreamLi
 			IBERROR(157);		// msg 157 cannot sort on a field that does not exist
 		if (desc->dsc_dtype >= dtype_aligned)
 			map_length = FB_ALIGN(map_length, type_alignments[desc->dsc_dtype]);
+
 		map_item->clear();
 		map_item->fieldId = (SSHORT) id;
 		map_item->stream = stream;
@@ -2795,7 +2753,7 @@ static bool gen_equi_join(thread_db* tdbb, OptimizerBlk* opt, RiverList& org_riv
 			continue;
 
 		BoolExprNode* const node = tail->opt_conjunct_node;
-		ComparativeBoolNode* cmpNode = node->as<ComparativeBoolNode>();
+		ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(node);
 
 		if (!cmpNode || (cmpNode->blrOp != blr_eql && cmpNode->blrOp != blr_equiv))
 			continue;
@@ -2839,9 +2797,9 @@ static bool gen_equi_join(thread_db* tdbb, OptimizerBlk* opt, RiverList& org_riv
 		{
 			River* const river1 = *iter1;
 
-			if (!river1->isReferenced(node1))
+			if (!river1->isReferenced(csb, node1))
 			{
-				if (!river1->isReferenced(node2))
+				if (!river1->isReferenced(csb, node2))
 					continue;
 
 				ValueExprNode* const temp = node1;
@@ -2855,7 +2813,7 @@ static bool gen_equi_join(thread_db* tdbb, OptimizerBlk* opt, RiverList& org_riv
 			{
 				River* const river2 = *iter2;
 
-				if (river2->isReferenced(node2))
+				if (river2->isReferenced(csb, node2))
 				{
 					for (eq_class = classes; eq_class < last_class; eq_class += cnt)
 					{
@@ -2963,8 +2921,8 @@ static bool gen_equi_join(thread_db* tdbb, OptimizerBlk* opt, RiverList& org_riv
 			for (selected_class = selected_classes.begin();
 				 selected_class != selected_classes.end(); ++selected_class)
 			{
-				key->descending.add(false);	// Ascending sort
-				key->nullOrder.add(rse_nulls_default);	// Default nulls placement
+				key->direction.add(ORDER_ASC);	// Ascending sort
+				key->nullOrder.add(NULLS_DEFAULT);	// Default nulls placement
 				key->expressions.add((*selected_class)[number]);
 			}
 
@@ -3030,6 +2988,7 @@ static bool gen_equi_join(thread_db* tdbb, OptimizerBlk* opt, RiverList& org_riv
 		BoolExprNode* const node = tail->opt_conjunct_node;
 
 		if (!(tail->opt_conjunct_flags & opt_conjunct_used) &&
+			!(node->nodFlags & ExprNode::FLAG_RESIDUAL) &&
 			node->computable(csb, INVALID_STREAM, false))
 		{
 			compose(*tdbb->getDefaultPool(), &boolean, node);
@@ -3123,7 +3082,7 @@ static BoolExprNode* make_inference_node(CompilerScratch* csb, BoolExprNode* boo
 	thread_db* tdbb = JRD_get_thread_data();
 	DEV_BLKCHK(csb, type_csb);
 
-	ComparativeBoolNode* cmpNode = boolean->as<ComparativeBoolNode>();
+	ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(boolean);
 	fb_assert(cmpNode);	// see our caller
 
 	// Clone the input predicate
@@ -3171,8 +3130,8 @@ static bool map_equal(const ValueExprNode* field1, const ValueExprNode* field2, 
  *	Order of the input fields is important.
  *
  **************************************/
-	const FieldNode* fieldNode1 = field1->as<FieldNode>();
-	const FieldNode* fieldNode2 = field2->as<FieldNode>();
+	const FieldNode* fieldNode1 = nodeAs<FieldNode>(field1);
+	const FieldNode* fieldNode2 = nodeAs<FieldNode>(field2);
 
 	if (!fieldNode1 || !fieldNode2)
 		return false;
@@ -3185,8 +3144,8 @@ static bool map_equal(const ValueExprNode* field1, const ValueExprNode* field2, 
 		 sourcePtr != sourceEnd;
 		 ++sourcePtr, ++targetPtr)
 	{
-		const FieldNode* mapFrom = (*sourcePtr)->as<FieldNode>();
-		const FieldNode* mapTo = (*targetPtr)->as<FieldNode>();
+		const FieldNode* mapFrom = nodeAs<FieldNode>(*sourcePtr);
+		const FieldNode* mapTo = nodeAs<FieldNode>(*targetPtr);
 
 		if (!mapFrom || !mapTo)
 			continue;
@@ -3276,8 +3235,8 @@ static bool node_equality(const ValueExprNode* node1, const ValueExprNode* node2
 	if (node1 == node2)
 		return true;
 
-	const FieldNode* fieldNode1 = node1->as<FieldNode>();
-	const FieldNode* fieldNode2 = node2->as<FieldNode>();
+	const FieldNode* fieldNode1 = nodeAs<FieldNode>(node1);
+	const FieldNode* fieldNode2 = nodeAs<FieldNode>(node2);
 
 	if (fieldNode1 && fieldNode2)
 	{
@@ -3302,8 +3261,8 @@ static bool node_equality(const BoolExprNode* node1, const BoolExprNode* node2)
 	if (node1 == node2)
 		return true;
 
-	const ComparativeBoolNode* cmpNode = node1->as<ComparativeBoolNode>();
-	const ComparativeBoolNode* cmpNode2 = node2->as<ComparativeBoolNode>();
+	const ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(node1);
+	const ComparativeBoolNode* cmpNode2 = nodeAs<ComparativeBoolNode>(node2);
 
 	if (cmpNode && cmpNode2 && cmpNode->blrOp == cmpNode2->blrOp &&
 		(cmpNode->blrOp == blr_eql || cmpNode->blrOp == blr_equiv))
@@ -3353,17 +3312,17 @@ static ValueExprNode* optimize_like(thread_db* tdbb, CompilerScratch* csb, Compa
 
 	// if the pattern string or the escape string can't be
 	// evaluated at compile time, forget it
-	if (!pattern_node->is<LiteralNode>() || (escape_node && !escape_node->is<LiteralNode>()))
+	if (!nodeIs<LiteralNode>(pattern_node) || (escape_node && !nodeIs<LiteralNode>(escape_node)))
 		return NULL;
 
 	dsc match_desc;
 	match_node->getDesc(tdbb, csb, &match_desc);
 
-	dsc* pattern_desc = &pattern_node->as<LiteralNode>()->litDesc;
+	dsc* pattern_desc = &nodeAs<LiteralNode>(pattern_node)->litDesc;
 	dsc* escape_desc = NULL;
 
 	if (escape_node)
-		escape_desc = &escape_node->as<LiteralNode>()->litDesc;
+		escape_desc = &nodeAs<LiteralNode>(escape_node)->litDesc;
 
 	// if either is not a character expression, forget it
 	if ((match_desc.dsc_dtype > dtype_any_text) ||
@@ -3540,14 +3499,14 @@ static void set_direction(SortNode* fromClause, SortNode* toClause)
 	const size_t fromCount = fromClause->expressions.getCount();
 
 	fb_assert(fromCount <= toClause->expressions.getCount());
-	fb_assert(fromCount == fromClause->descending.getCount() &&
+	fb_assert(fromCount == fromClause->direction.getCount() &&
 		fromCount == fromClause->nullOrder.getCount());
-	fb_assert(toClause->expressions.getCount() == toClause->descending.getCount() &&
+	fb_assert(toClause->expressions.getCount() == toClause->direction.getCount() &&
 		toClause->expressions.getCount() == toClause->nullOrder.getCount());
 
 	for (FB_SIZE_T i = 0; i < fromCount; ++i)
 	{
-		toClause->descending[i] = fromClause->descending[i];
+		toClause->direction[i] = fromClause->direction[i];
 		toClause->nullOrder[i] = fromClause->nullOrder[i];
 	}
 }
@@ -3590,8 +3549,8 @@ static void set_position(const SortNode* from_clause, SortNode* to_clause, const
 		for (const NestConst<ValueExprNode>* const to_end = to_ptr + count;
 			 to_ptr != to_end; ++to_ptr)
 		{
-			const FieldNode* fromField = (*from_ptr)->as<FieldNode>();
-			const FieldNode* toField = (*to_ptr)->as<FieldNode>();
+			const FieldNode* fromField = nodeAs<FieldNode>(*from_ptr);
+			const FieldNode* toField = nodeAs<FieldNode>(*to_ptr);
 
 			if ((map && map_equal(*to_ptr, *from_ptr, map)) ||
 				(!map &&

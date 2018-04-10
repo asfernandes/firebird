@@ -549,7 +549,7 @@ without specifying a character set.', NULL);
 ('exception_array_bounds_exceeded', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 450, NULL, 'Array bounds exceeded.  The code attempted to access an array element that is out of bounds.', NULL, NULL);
 ('exception_float_denormal_operand', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 451, NULL, 'Float denormal operand.  One of the floating-point operands is too small to represent a standard float value.', NULL, NULL);
 ('exception_float_divide_by_zero', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 452, NULL, 'Floating-point divide by zero.  The code attempted to divide a floating-point value by zero.', NULL, NULL);
-('exception_float_inexact_result', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 453, NULL, 'Floating-point inexact result.  The result of a floating-point operation cannot be represented as a deciaml fraction.', NULL, NULL);
+('exception_float_inexact_result', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 453, NULL, 'Floating-point inexact result.  The result of a floating-point operation cannot be represented as a decimal fraction.', NULL, NULL);
 ('exception_float_invalid_operand', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 454, NULL, 'Floating-point invalid operand.  An indeterminant error occurred during a floating-point operation.', NULL, NULL);
 ('exception_float_overflow', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 455, NULL, 'Floating-point overflow.  The exponent of a floating-point operation is greater than the magnitude allowed.', NULL, NULL);
 ('exception_float_stack_check', 'POST_EXCEPTIONS and POST_EXTRENA', 'common.h', NULL, 0, 456, NULL, 'Floating-point stack check.  The stack overflowed or underflowed as the result of a floating-point operation.', NULL, NULL);
@@ -564,7 +564,7 @@ without specifying a character set.', NULL);
 ('exception_sigfpe', 'ISC_exception_post', 'isc_sync.c', NULL, 0, 465, NULL, 'Floating Point Error. The Code caused an Arithmetic Exception or a floating point exception.', NULL, NULL);
 ('ext_file_delete', 'EXT_erase', 'ext.c', NULL, 0, 466, NULL, 'Cannot delete rows from external files.', NULL, NULL);
 ('ext_file_modify', 'EXT_modify', 'ext.c', NULL, 0, 467, NULL, 'Cannot update rows in external files.', NULL, NULL);
-('adm_task_denied', 'GDS_ATTACH_DATABASE', 'jrd.c', NULL, 0, 468, NULL, 'Unable to perform operation.  You must be either SYSDBA or owner of the database', NULL, NULL);
+('adm_task_denied', 'GDS_ATTACH_DATABASE', 'jrd.c', NULL, 0, 468, NULL, 'Unable to perform operation', NULL, NULL);
 ('extract_input_mismatch', 'looper', 'evl.c', NULL, 0, 469, NULL, 'Specified EXTRACT part does not exist in input datatype', NULL, NULL);
 ('insufficient_svc_privileges', 'SVC_query', 'svc.c', NULL, 0, 470, NULL, 'Service @1 requires SYSDBA permissions.  Reattach to the Service Manager using the SYSDBA account.', NULL, NULL);
 ('file_in_use', 'SVC_query', 'svc.c', NULL, 0, 471, NULL, 'The file @1 is currently in use by another process.  Try again later.', NULL, NULL);
@@ -896,11 +896,102 @@ Data source : @4', NULL, NULL)
 ('login_error', NULL, 'server.cpp', NULL, 0, 786, NULL, 'Error occurred during login, please check server firebird.log for details', NULL, NULL);
 ('already_opened', 'lockDatabaseFile', 'unix.cpp', NULL, 0, 787, NULL, 'Database already opened with engine instance, incompatible with current', NULL, NULL);
 ('bad_crypt_key', NULL, 'CryptoManager.cpp', NULL, 0, 788, NULL, 'Invalid crypt key @1', NULL, NULL);
-('encrypt_error', NULL, 'CryptoManager.cpp', NULL, 0, 789, NULL, 'Page requires encyption but crypt plugin is missing', NULL, NULL);
+('encrypt_error', NULL, 'CryptoManager.cpp', NULL, 0, 789, NULL, 'Page requires encryption but crypt plugin is missing', NULL, NULL);
 ('max_idx_depth', NULL, 'btr.cpp', NULL, 0, 790, NULL, 'Maximum index depth (@1 levels) is reached', NULL, NULL);
 ('wrong_prvlg', 'SCL_convert_privilege', 'scl.epp', NULL, 0, 791, NULL, 'System privilege @1 does not exist', NULL, NULL);
-('miss_prvlg', 'validateAccess', 'jrd.cpp', NULL, 0, 792, NULL, 'Unable to perform operation: system privilege @1 is missing', NULL, NULL);
+('miss_prvlg', 'validateAccess', 'jrd.cpp', NULL, 0, 792, NULL, 'System privilege @1 is missing', NULL, NULL);
 ('crypt_checksum', 'CryptoManager::checkDigitalSignature', 'CryptoManager.cpp', NULL, 0, 793, NULL, 'Invalid or missing checksum of encrypted database', NULL, NULL);
+('not_dba', 'Service::start', 'svc.cpp', NULL, 0, 794, NULL, 'You must have SYSDBA rights at this server', NULL, NULL);
+('no_cursor', 'DSQL_open', 'dsql.cpp', NULL, 0, 795, NULL, 'Cannot open cursor for non-SELECT statement', NULL, NULL);
+('dsql_window_incompat_frames', NULL, 'ExprNodes.cpp', NULL, 0, 796, NULL, 'If <window frame bound 1> specifies @1, then <window frame bound 2> shall not specify @2', NULL, NULL);
+('dsql_window_range_multi_key', NULL, 'ExprNodes.cpp', NULL, 0, 797, NULL, 'RANGE based window with <expr> {PRECEDING | FOLLOWING} cannot have ORDER BY with more than one value', NULL, NULL);
+('dsql_window_range_inv_key_type', NULL, 'ExprNodes.cpp', NULL, 0, 798, NULL, 'RANGE based window must have an ORDER BY key of numerical, date, time or timestamp types', NULL, NULL);
+('dsql_window_frame_value_inv_type', NULL, 'ExprNodes.cpp', NULL, 0, 799, NULL, 'Window RANGE/ROWS PRECEDING/FOLLOWING value must be of a numerical type', NULL, NULL);
+('window_frame_value_invalid', NULL, 'ExprNodes.cpp', NULL, 0, 800, NULL, 'Invalid PRECEDING or FOLLOWING offset in window function: cannot be negative', NULL, NULL);
+('dsql_window_not_found', NULL, 'ExprNodes.cpp', NULL, 0, 801, NULL, 'Window @1 not found', NULL, NULL);
+('dsql_window_cant_overr_part', NULL, 'ExprNodes.cpp', NULL, 0, 802, NULL, 'Cannot use PARTITION BY clause while overriding the window @1', NULL, NULL);
+('dsql_window_cant_overr_order', NULL, 'ExprNodes.cpp', NULL, 0, 803, NULL, 'Cannot use ORDER BY clause while overriding the window @1 which already has an ORDER BY clause', NULL, NULL);
+('dsql_window_cant_overr_frame', NULL, 'ExprNodes.cpp', NULL, 0, 804, NULL, 'Cannot override the window @1 because it has a frame clause. Tip: it can be used without parenthesis in OVER', NULL, NULL);
+('dsql_window_duplicate', NULL, 'ExprNodes.cpp', NULL, 0, 805, NULL, 'Duplicate window definition for @1', NULL, NULL);
+('sql_too_long', 'prepareStatement', 'dsql.cpp', NULL, 0, 806, NULL, 'SQL statement is too long. Maximum size is @1 bytes.', NULL, NULL);
+('cfg_stmt_timeout', 'thread_db::checkCancelState', 'jrd.cpp', NULL, 0, 807, NULL, 'Config level timeout expired.', NULL, NULL);
+('att_stmt_timeout', 'thread_db::checkCancelState', 'jrd.cpp', NULL, 0, 808, NULL, 'Attachment level timeout expired.', NULL, NULL);
+('req_stmt_timeout', 'thread_db::checkCancelState', 'jrd.cpp', NULL, 0, 809, NULL, 'Statement level timeout expired.', NULL, NULL);
+('att_shut_killed', NULL, 'jrd.cpp', NULL, 0, 810, NULL, 'Killed by database administrator.', NULL, NULL);
+('att_shut_idle', NULL, 'jrd.cpp', NULL, 0, 811, NULL, 'Idle timeout expired.', NULL, NULL);
+('att_shut_db_down', NULL, 'jrd.cpp', NULL, 0, 812, NULL, 'Database is shutdown.', NULL, NULL);
+('att_shut_engine', NULL, 'jrd.cpp', NULL, 0, 813, NULL, 'Engine is shutdown.', NULL, NULL);
+('overriding_without_identity', NULL, 'StmtNodes.cpp', NULL, 0, 814, NULL, 'OVERRIDING clause can be used only when an identity column is present in the INSERT''s field list for table/view @1', NULL, NULL);
+('overriding_system_invalid', NULL, 'StmtNodes.cpp', NULL, 0, 815, NULL, 'OVERRIDING SYSTEM VALUE can be used only for identity column defined as ''GENERATED ALWAYS'' in INSERT for table/view @1', NULL, NULL);
+('overriding_user_invalid', NULL, 'StmtNodes.cpp', NULL, 0, 816, NULL, 'OVERRIDING USER VALUE can be used only for identity column defined as ''GENERATED BY DEFAULT'' in INSERT for table/view @1', NULL, NULL);
+('overriding_system_missing', NULL, 'StmtNodes.cpp', NULL, 0, 817, NULL, 'OVERRIDING SYSTEM VALUE should be used to override the value of an identity column defined as ''GENERATED ALWAYS'' in table/view @1', NULL, NULL);
+('decprecision_err', NULL, 'dsql parse.y', NULL, 0, 818, NULL, 'DecFloat precision must be 16 or 34', NULL, NULL);
+('decfloat_divide_by_zero', 'DecimalContext::checkForExceptions', 'DecFloat.cpp', NULL, 0, 819, NULL, 'Decimal float divide by zero.  The code attempted to divide a DECFLOAT value by zero.', NULL, NULL);
+('decfloat_inexact_result', 'DecimalContext::checkForExceptions', 'DecFloat.cpp', NULL, 0, 820, NULL, 'Decimal float inexact result.  The result of an operation cannot be represented as a decimal fraction.', NULL, NULL);
+('decfloat_invalid_operation', 'DecimalContext::checkForExceptions', 'DecFloat.cpp', NULL, 0, 821, NULL, 'Decimal float invalid operation.  An indeterminant error occurred during an operation.', NULL, NULL);
+('decfloat_overflow', 'DecimalContext::checkForExceptions', 'DecFloat.cpp', NULL, 0, 822, NULL, 'Decimal float overflow.  The exponent of a result is greater than the magnitude allowed.', NULL, NULL);
+('decfloat_underflow', 'DecimalContext::checkForExceptions', 'DecFloat.cpp', NULL, 0, 823, NULL, 'Decimal float underflow.  The exponent of a result is less than the magnitude allowed.', NULL, NULL);
+('subfunc_notdef', NULL, 'StmtNodes.cpp', NULL, 0, 824, NULL, 'Sub-function @1 has not been defined', NULL, NULL);
+('subproc_notdef', NULL, 'StmtNodes.cpp', NULL, 0, 825, NULL, 'Sub-procedure @1 has not been defined', NULL, NULL);
+('subfunc_signat', NULL, 'StmtNodes.cpp', NULL, 0, 826, NULL, 'Sub-function @1 has a signature mismatch with its forward declaration', NULL, NULL);
+('subproc_signat', NULL, 'StmtNodes.cpp', NULL, 0, 827, NULL, 'Sub-procedure @1 has a signature mismatch with its forward declaration', NULL, NULL);
+('subfunc_defvaldecl', NULL, 'StmtNodes.cpp', NULL, 0, 828, NULL, 'Default values for parameters are not allowed in definition of the previously declared sub-function @1', NULL, NULL);
+('subproc_defvaldecl', NULL, 'StmtNodes.cpp', NULL, 0, 829, NULL, 'Default values for parameters are not allowed in definition of the previously declared sub-procedure @1', NULL, NULL);
+('subfunc_not_impl', NULL, 'StmtNodes.cpp', NULL, 0, 830, NULL, 'Sub-function @1 was declared but not implemented', NULL, NULL);
+('subproc_not_impl', NULL, 'StmtNodes.cpp', NULL, 0, 831, NULL, 'Sub-procedure @1 was declared but not implemented', NULL, NULL);
+('sysf_invalid_hash_algorithm', NULL, 'SysFunction.cpp', NULL, 0, 832, NULL, 'Invalid HASH algorithm @1', NULL, NULL);
+('expression_eval_index', NULL, 'btr.cpp', NULL, 0, 833, NULL, 'Expression evaluation error for index "@1" on table "@2"', NULL, NULL);
+('decfloat_trap', NULL, 'StmtNodes.cpp', NULL, 0, 834, NULL, 'Invalid decfloat trap state @1', NULL, NULL);
+('decfloat_round', NULL, 'StmtNodes.cpp', NULL, 0, 835, NULL, 'Invalid decfloat rounding mode @1', NULL, NULL);
+('sysf_invalid_first_last_part', 'evlFirstLastDay', 'SysFunction.cpp', NULL, 0, 836, NULL, 'Invalid part @1 to calculate the @1 of a DATE/TIMESTAMP', NULL, NULL)
+('sysf_invalid_date_timestamp', 'evlFirstLastDay', 'SysFunction.cpp', NULL, 0, 837, NULL, 'Expected DATE/TIMESTAMP value in @1', NULL, NULL)
+('precision_err2', NULL, 'dsql parse.y', NULL, 0, 838, NULL, 'Precision must be from @1 to @2', NULL, NULL);
+('bad_batch_handle', NULL, 'jrd.cpp', NULL, 0, 839, NULL, 'invalid batch handle', NULL, NULL);
+('intl_char', NULL, 'IntlParametersBlock.cpp', NULL, 0, 840, NULL, 'Bad international character in tag @1', NULL, NULL);
+('null_block', NULL, 'utils.cpp', NULL, 0, 841, NULL, 'Null data in parameters block with non-zero length', NULL, NULL);
+('mixed_info', NULL, 'utils.cpp', NULL, 0, 842, NULL, 'Items working with running service and getting generic server information should not be mixed in single info block', NULL, NULL);
+('unknown_info', NULL, 'utils.cpp', NULL, 0, 843, NULL, 'Unknown information item, code @1', NULL, NULL);
+('bpb_version', NULL, 'utils.cpp', NULL, 0, 844, NULL, 'Wrong version of blob parameters block @1, should be @2', NULL, NULL);
+('user_manager', NULL, NULL, NULL, 0, 845, NULL, 'User management plugin is missing or failed to load', NULL, NULL);
+('icu_entrypoint', NULL, 'unicode_util.cpp', NULL, 0, 846, NULL, 'Missing entrypoint @1 in ICU library', NULL, NULL);
+('icu_library', NULL, 'unicode_util.cpp', NULL, 0, 847, NULL, 'Could not find acceptable ICU library', NULL, NULL);
+('metadata_name', NULL, 'MsgMetadata.cpp', NULL, 0, 848, NULL, 'Name @1 not found in system MetadataBuilder', NULL, NULL);
+('tokens_parse', NULL, 'Tokens.cpp', NULL, 0, 849, NULL, 'Parse to tokens error', NULL, NULL);
+('iconv_open', NULL, 'isc_file.cpp', NULL, 0, 850, NULL, 'Error opening international conversion descriptor from @1 to @2', NULL, NULL);
+('batch_compl_range', NULL, 'BatchCompletionState.h', NULL, 0, 851, NULL, 'Message @1 is out of range, only @2 messages in batch', NULL, NULL);
+('batch_compl_detail', NULL, 'BatchCompletionState.h', NULL, 0, 852, NULL, 'Detailed error info for message @1 is missing in batch', NULL, NULL);
+('deflate_init', NULL, 'remote.cpp', NULL, 0, 853, NULL, 'Compression stream init error @1', NULL, NULL);
+('inflate_init', NULL, 'remote.cpp', NULL, 0, 854, NULL, 'Decompression stream init error @1', NULL, NULL);
+('big_segment', NULL, NULL, NULL, 0, 855, NULL, 'Segment size (@1) should not exceed 65535 (64K - 1) when using segmented blob', NULL, NULL);
+('batch_policy', NULL, NULL, NULL, 0, 856, NULL, 'Invalid blob policy in the batch for @1() call', NULL, NULL);
+('batch_defbpb', NULL, NULL, NULL, 0, 857, NULL, 'Can''t change default BPB after adding any data to batch', NULL, NULL);
+('batch_align', NULL, 'interface.cpp', NULL, 0, 858, NULL, 'Unexpected info buffer structure querying for default blob alignment', NULL, NULL);
+('multi_segment_dup', 'getMultiPartConnectParameter', 'server.cpp', NULL, 0, 859, NULL, 'Duplicated segment @1 in multisegment connect block parameter', NULL, NULL);
+('non_plugin_protocol', NULL, 'server.cpp', NULL, 0, 860, NULL, 'Plugin not supported by network protocol', NULL, NULL);
+('message_format', NULL, 'server.cpp', NULL, 0, 861, NULL, 'Error parsing message format', NULL, NULL);
+('batch_param_version', NULL, NULL, NULL, 0, 862, NULL, 'Wrong version of batch parameters block @1, should be @2', NULL, NULL);
+('batch_msg_long', NULL, '** Unused **', NULL, 0, 863, NULL, 'Message size (@1) in batch exceeds internal buffer size (@2)', NULL, NULL);
+('batch_open', NULL, 'DsqlBatch.cpp', NULL, 0, 864, NULL, 'Batch already opened for this statement', NULL, NULL);
+('batch_type', NULL, 'DsqlBatch.cpp', NULL, 0, 865, NULL, 'Invalid type of statement used in batch', NULL, NULL);
+('batch_param', NULL, 'DsqlBatch.cpp', NULL, 0, 866, NULL, 'Statement used in batch must have parameters', NULL, NULL);
+('batch_blobs', NULL, 'DsqlBatch.cpp', NULL, 0, 867, NULL, 'There are no blobs in associated with batch statement', NULL, NULL);
+('batch_blob_append', NULL, 'DsqlBatch.cpp', NULL, 0, 868, NULL, 'appendBlobData() is used to append data to last blob but no such blob was added to the batch', NULL, NULL);
+('batch_stream_align', NULL, 'DsqlBatch.cpp', NULL, 0, 869, NULL, 'Portions of data, passed as blob stream, should have size multiple to the alignment required for blobs', NULL, NULL);
+('batch_rpt_blob', NULL, 'DsqlBatch.cpp', NULL, 0, 870, NULL, 'Repeated blob id @1 in registerBlob()', NULL, NULL);
+('batch_blob_buf', NULL, 'DsqlBatch.cpp', NULL, 0, 871, NULL, 'Blob buffer format error', NULL, NULL);
+('batch_small_data', NULL, 'DsqlBatch.cpp', NULL, 0, 872, NULL, 'Unusable (too small) data remained in @1 buffer', NULL, NULL);
+('batch_cont_bpb', NULL, 'DsqlBatch.cpp', NULL, 0, 873, NULL, 'Blob continuation should not contain BPB', NULL, NULL);
+('batch_big_bpb', NULL, 'DsqlBatch.cpp', NULL, 0, 874, NULL, 'Size of BPB (@1) greater than remaining data (@2)', NULL, NULL);
+('batch_big_segment', NULL, 'DsqlBatch.cpp', NULL, 0, 875, NULL, 'Size of segment (@1) greater than current BLOB data (@2)', NULL, NULL);
+('batch_big_seg2', NULL, 'DsqlBatch.cpp', NULL, 0, 876, NULL, 'Size of segment (@1) greater than available data (@2)', NULL, NULL);
+('batch_blob_id', NULL, 'DsqlBatch.cpp', NULL, 0, 877, NULL, 'Unknown blob ID @1 in the batch message', NULL, NULL);
+('batch_too_big', NULL, 'DsqlBatch.cpp', NULL, 0, 878, NULL, 'Internal buffer overflow - batch too big', NULL, NULL);
+('num_literal', NULL, 'make.cpp', NULL, 0, 879, NULL, 'Numeric literal too long', NULL, NULL);
+('map_event', NULL, 'Mapping.cpp', NULL, 0, 880, NULL, 'Error using events in mapping shared memory: @1', NULL, NULL);
+('map_overflow', NULL, 'Mapping.cpp', NULL, 0, 881, NULL, 'Global mapping memory overflow', NULL, NULL);
+('hdr_overflow', NULL, 'CryptoManager.cpp', NULL, 0, 882, NULL, 'Header page overflow - too many clumplets on it', NULL, NULL);
+('vld_plugins', NULL, 'ValidatePassword.cpp', NULL, 0, 883, NULL, 'No matching client/server authentication plugins configured for execute statement in embedded datasource', NULL, NULL);
+('db_crypt_key', NULL, 'CryptoManager.cpp', NULL, 0, 884, NULL, 'Missing database encryption key for your attachment', NULL, NULL);
 -- QLI
 (NULL, NULL, NULL, NULL, 1, 0, NULL, 'expected type', NULL, NULL);
 (NULL, NULL, NULL, NULL, 1, 1, NULL, 'bad block type', NULL, NULL);
@@ -1687,6 +1778,8 @@ COMMIT WORK;
 ('dsql_no_output_sqlda', NULL, NULL, NULL, 7, 38, NULL, 'No SQLDA for output values provided', NULL, NULL);
 ('dsql_wrong_param_num', NULL, NULL, NULL, 7, 39, NULL, 'Wrong number of parameters (expected @1, got @2)', NULL, NULL);
 -- Do not change the arguments of the previous DSQL messages.
+('dsql_invalid_drop_ss_clause', 'CreateAlterTriggerNode::dsqlPass', 'DdlNodes.epp', NULL, 7, 40, NULL, 'Invalid DROP SQL SECURITY clause', NULL, NULL);
+('upd_ins_cannot_default', 'pass1_update_or_insert', 'pass1.cpp', NULL, 7, 41, NULL, 'UPDATE OR INSERT value for field @1, part of the implicit or explicit MATCHING clause, cannot be DEFAULT', NULL, NULL);
 -- Write the new DSQL messages here.
 -- DYN
 (NULL, NULL, 'dyn.c', NULL, 8, 1, NULL, 'ODS version not supported by DYN', NULL, NULL);
@@ -1949,7 +2042,7 @@ COMMIT WORK;
 ('dyn_procnotdef_package', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 264, NULL, 'Procedure @1 has not been defined on the package body @2', NULL, NULL);
 ('dyn_funcsignat_package', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 265, NULL, 'Function @1 has a signature mismatch on package body @2', NULL, NULL);
 ('dyn_procsignat_package', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 266, NULL, 'Procedure @1 has a signature mismatch on package body @2', NULL, NULL);
-('dyn_defvaldecl_package_proc', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 267, NULL, 'Default values for parameters are allowed only in declaration of packaged procedure @1.@2', NULL, NULL);
+('dyn_defvaldecl_package_proc', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 267, NULL, 'Default values for parameters are not allowed in the definition of a previously declared packaged procedure @1.@2', NULL, NULL);
 ('dyn_dup_function', 'DYN_define_function', 'dyn_def.epp', NULL, 8, 268, NULL, 'Function @1 already exists', NULL, NULL);
 ('dyn_package_body_exists', NULL, 'DdlNodes.epp/PackageNodes.epp', NULL, 8, 269, NULL, 'Package body @1 already exists', NULL, NULL);
 ('dyn_invalid_ddl_func', 'CreateAlterFunctionNode::compile', 'DdlNodes.epp', NULL, 8, 270, NULL, 'Invalid DDL statement for function @1', NULL, NULL);
@@ -1972,12 +2065,17 @@ COMMIT WORK;
 ('dyn_cant_modify_sysobj', NULL, 'DdlNodes.epp', NULL, 8, 287, NULL, 'System @1 @2 cannot be modified', NULL, 'Ex: System generator rdb$... cannot be modified');
 ('dyn_cant_use_zero_increment', NULL, 'DdlNodes.epp', NULL, 8, 288, NULL, 'INCREMENT BY 0 is an illegal option for sequence @1', NULL, NULL);
 ('dyn_cant_use_in_foreignkey', NULL, 'DdlNodes.epp', NULL, 8, 289, NULL, 'Can''t use @1 in FOREIGN KEY constraint', NULL, NULL);
-('dyn_defvaldecl_package_func', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 290, NULL, 'Default values for parameters are allowed only in declaration of packaged function @1.@2', NULL, NULL);
+('dyn_defvaldecl_package_func', 'CreatePackageBodyNode::execute', 'PackageNodes.epp', NULL, 8, 290, NULL, 'Default values for parameters are not allowed in the definition of a previously declared packaged function @1.@2', NULL, NULL);
 ('dyn_create_user_no_password', 'CreateAlterUserNode', 'DdlNodes.epp', NULL, 8, 291, NULL, 'Password must be specified when creating user', NULL, NULL);
 ('dyn_cyclic_role', 'GrantRevokeNode::grantRevoke', 'DdlNodes.epp', NULL, 8, 292, NULL, 'role @1 can not be granted to role @2', NULL, NULL);
 (NULL, 'CreateAlterRoleNode::execute', 'DdlNodes.epp', NULL, 8, 293, NULL, 'DROP SYSTEM PRIVILEGES should not be used in CREATE ROLE operator', NULL, NULL);
 (NULL, 'CreateAlterRoleNode::execute', 'DdlNodes.epp', NULL, 8, 294, NULL, 'Access to SYSTEM PRIVILEGES in ROLES denied to @1', NULL, NULL);
 (NULL, 'grant/revoke', 'DdlNode.epp', NULL, 8, 295, NULL, 'Only @1, DB owner @2 or user with privilege USE_GRANTED_BY_CLAUSE can use GRANTED BY clause', NULL, NULL);
+('dyn_cant_use_zero_inc_ident', NULL, 'DdlNodes.epp', NULL, 8, 296, NULL, 'INCREMENT BY 0 is an illegal option for identity column @1 of table @2', NULL, NULL);
+('dyn_concur_alter_database', 'AlterDatabaseNode::execute', 'DdlNodes.epp', NULL, 8, 297, NULL, 'Concurrent ALTER DATABASE is not supported', NULL, NULL);
+('dyn_incompat_alter_database', 'AlterDatabaseNode::execute', 'DdlNodes.epp', NULL, 8, 298, NULL, 'Incompatible ALTER DATABASE clauses: ''@1'' and ''@2''', NULL, NULL);
+(NULL, 'checkGrantorCanGrantObject', 'DdlNodes.epp', NULL, 8, 299, NULL, 'no @1 privilege with grant option on DDL @2', NULL, NULL);
+(NULL, 'checkGrantorCanGrantObject', 'DdlNodes.epp', NULL, 8, 300, NULL, 'no @1 privilege with grant option on object @2', NULL, NULL);
 COMMIT WORK;
 -- TEST
 (NULL, 'main', 'test.c', NULL, 11, 0, NULL, 'This is a modified text message', NULL, NULL);
@@ -2224,7 +2322,7 @@ ERROR: Backup incomplete', NULL, NULL);
 (NULL, 'read_header', 'mvol.c', NULL, 12, 230, NULL, 'Expected backup start time @1, found @2', NULL, NULL);
 (NULL, 'read_header', 'mvol.c', NULL, 12, 231, NULL, 'Expected backup database @1, found @2', NULL, NULL);
 (NULL, 'read_header', 'mvol.c', NULL, 12, 232, NULL, 'Expected volume number @1, found volume @2', NULL, NULL);
-('gbak_db_in_use', 'open_files', 'burp.c', NULL, 12, 233, NULL, 'could not drop database @1 (database might be in use)', NULL, NULL);
+('gbak_db_in_use', 'open_files', 'burp.c', NULL, 12, 233, NULL, 'could not drop database @1 (no privilege or database might be in use)', NULL, NULL);
 (NULL, 'get_security_class', 'restore.e', NULL, 12, 234, NULL, 'Skipped bad security class entry: @1', NULL, NULL);
 (NULL, 'convert_sub_type', 'restore.e', NULL, 12, 235, NULL, 'Unknown V3 SUB_TYPE: @1 in FIELD: @2.', NULL, NULL);
 (NULL, 'cvt_v3_to_v4_intl', 'restore.e', NULL, 12, 236, NULL, 'Converted V3 sub_type: @1 to character_set_id: @2 and collate_id: @3.', NULL, NULL);
@@ -2310,7 +2408,7 @@ ERROR: Backup incomplete', NULL, NULL);
 (NULL, 'get_exception', 'restore.epp', NULL, 12, 313, NULL, 'Trying to recover from unexpected attribute @1 due to wrong message length for exception @2', NULL, NULL);
 (NULL, 'put_exception', 'backup.epp', NULL, 12, 314, NULL, 'Attribute not specified for storing text bigger than 255 bytes', NULL, NULL);
 (NULL, 'put_exception', 'backup.epp', NULL, 12, 315, NULL, 'Unable to store text bigger than 65536 bytes', NULL, NULL);
-(NULL, 'fix_security_class_name', 'restore.epp', NULL, 12, 316, NULL, 'Failed while fixing the security class name', NULL, NULL);
+(NULL, 'fix_security_class_name', 'restore.epp', NULL, 12, 316, NULL, 'Failed while adjusting the security class name', NULL, NULL);
 (NULL, 'burp_usage', 'burp.cpp', NULL, 12, 317, NULL, 'Usage:', NULL, NULL);
 (NULL, 'burp_usage', 'burp.cpp', NULL, 12, 318, NULL, '     gbak -b <db set> <backup set> [backup options] [general options]', NULL, NULL);
 (NULL, 'burp_usage', 'burp.cpp', NULL, 12, 319, NULL, '     gbak -c <backup set> <db set> [restore options] [general options]', NULL, NULL);
@@ -2344,14 +2442,14 @@ ERROR: Backup incomplete', NULL, NULL);
 (NULL, 'write_secclasses', 'backup.epp', NULL, 12, 347, NULL, 'writing security classes', NULL, NULL);
 ('gbak_db_format_too_old2', 'BACKUP_backup', 'backup.epp', NULL, 12, 348, NULL, 'database format @1 is too old to backup', NULL, NULL);
 (NULL, 'restore', 'restore.epp', NULL, 12, 349, NULL, 'backup version is @1', NULL, NULL);
-(NULL, 'fix_system_generators', 'restore.epp', NULL, 12, 350, NULL, 'fixing system generators', NULL, NULL);
+(NULL, 'fix_system_generators', 'restore.epp', NULL, 12, 350, NULL, 'adjusting system generators', NULL, NULL);
 (NULL, 'BURP_abort', 'burp.cpp', NULL, 12, 351, NULL, 'Error closing database, but backup file is OK', NULL, NULL);
 (NULL, NULL, 'restore.epp', NULL, 12, 352, NULL, 'database', NULL, NULL);
 (NULL, 'get_mapping', 'restore.epp', NULL, 12, 353, NULL, 'required mapping attributes are missing in backup file', NULL, NULL);
 (NULL, NULL, 'burp.cpp', NULL, 12, 354, NULL, 'missing regular expression to skip tables', NULL, NULL);
 (NULL, 'burp_usage', 'burp.c', NULL, 12, 355, NULL, '    @1SKIP_D(ATA)          skip data for table', NULL, NULL);
 (NULL, NULL, 'burp.cpp', NULL, 12, 356, NULL, 'regular expression to skip tables was already set', NULL, NULL);
-(NULL, 'update_view_dbkey_lengths', 'restore.epp', NULL, 12, 357, NULL, 'fixing views dbkey length', NULL, NULL);
+(NULL, 'update_view_dbkey_lengths', 'restore.epp', NULL, 12, 357, NULL, 'adjusting views dbkey length', NULL, NULL);
 (NULL, 'update_ownership', 'restore.epp', NULL, 12, 358, NULL, 'updating ownership of packages, procedures and tables', NULL, NULL);
 (NULL, 'fix_missing_privileges', 'restore.epp', NULL, 12, 359, NULL, 'adding missing privileges', NULL, NULL);
 (NULL, 'RESTORE_restore', 'restore.epp', NULL, 12, 360, NULL, 'adjusting the ONLINE and FORCED WRITES flags', NULL, NULL);
@@ -2364,6 +2462,8 @@ ERROR: Backup incomplete', NULL, NULL);
 ('gbak_wrong_perf', 'api_gbak/gbak', 'burp.cpp', NULL, 12, 367, NULL, 'wrong char "@1" at statistics parameter', NULL, NULL);
 ('gbak_too_long_perf', 'api_gbak/gbak', 'burp.cpp', NULL, 12, 368, NULL, 'too many chars at statistics parameter', NULL, NULL);
 (NULL, 'api_gbak/gbak', 'burp.cpp', NULL, 12, 369, NULL, 'total statistics', NULL, NULL);
+(NULL, 'get_blob', 'restore.epp', NULL, 12, 370, NULL, 'could not append BLOB data to batch', NULL, NULL);
+(NULL, 'get_data', 'restore.epp', NULL, 12, 371, NULL, 'could not start batch when restoring table @1, trying old way', NULL, NULL);
 -- SQLERR
 (NULL, NULL, NULL, NULL, 13, 1, NULL, 'Firebird error', NULL, NULL);
 (NULL, NULL, NULL, NULL, 13, 74, NULL, 'Rollback not performed', NULL, NULL);
@@ -2824,6 +2924,7 @@ COMMIT WORK;
 (NULL, 'CMP_get_desc', 'cmp.cpp', NULL, 15, 306, NULL, 'Found array data type with more than 16 dimensions', NULL, NULL);
 -- Do not change the arguments of the previous JRD_BUGCHK messages.
 -- Write the new JRD_BUGCHK messages here.
+(NULL, 'get_header', 'dpm.epp', NULL, 15, 307, NULL, 'RDB$PAGES written by non-system transaction, DB appears to be damaged', NULL, NULL);
 -- ISQL
 ('GEN_ERR', 'errmsg', 'isql.e', NULL, 17, 0, NULL, 'Statement failed, SQLSTATE = @1', NULL, NULL);
 ('USAGE', 'ISQL_main', 'isql.epp', NULL, 17, 1, NULL, 'usage:    isql [options] [<database>]', NULL, NULL);
@@ -2893,7 +2994,7 @@ This message begins with a TAB (''\t'') and ends with a newline (''\n'').', 17, 
 ('REPORT1', 'process_statement', 'isql.e', 'Each of these 4 items is followed by a newline (''\n'').', 17, 44, NULL, 'Current memory = !c
 Delta memory = !d
 Max memory = !x
-Elapsed time= !e sec
+Elapsed time = !e sec
 ', NULL, NULL);
 ('REPORT2', 'process_statement', 'isql.e', 'Each of these 5 items is followed by a newline (''\n'').', 17, 45, NULL, 'Cpu = !u sec
 Buffers = !b
@@ -3041,7 +3142,7 @@ Fetches = !f', NULL, NULL);
 ('REPORT_NEW1', 'print_performance', 'isql.epp', 'Each of these 4 items is followed by a newline (''\n'').', 17, 181, NULL, 'Current memory = !
 Delta memory = !
 Max memory = !
-Elapsed time= ~ sec
+Elapsed time = ~ sec
 ', NULL, NULL);
 ('REPORT_NEW2', 'print_performance', 'isql.epp', 'Each of these 5 items is followed by a newline (''\n'').', 17, 182, NULL, 'Cpu = ~ sec
 ', NULL, NULL);
@@ -3232,6 +3333,9 @@ Analyzing database pages ...', NULL, NULL);
 (NULL, 'main', 'dba.epp', NULL, 21, 55, NULL, 'no encrypted database support, only -e and -h can be used', NULL, NULL)
 (NULL, 'main', 'dba.epp', NULL, 21, 56, NULL, '    Empty pages: @1, full pages: @2', NULL, NULL);
 (NULL, 'dba_in_sw_table', 'dbaswi.h', NULL, 21, 57, NULL, '    -role   SQL role name', NULL, NULL);
+(NULL, 'main', 'dba.epp', NULL, 21, 58, NULL, 'Other pages: total @1, ENCRYPTED @2 (DB problem!), non-crypted @3', NULL, NULL)
+(NULL, 'main', 'dba.epp', NULL, 21, 59, NULL, 'Gstat execution time @1', NULL, NULL)
+(NULL, 'main', 'dba.epp', NULL, 21, 60, NULL, 'Gstat completion time @1', NULL, NULL)
 -- FBSVCMGR
 -- All messages use the new format.
 ('fbsvcmgr_bad_am', 'putAccessMode', 'fbsvcmgr.cpp', NULL, 22, 1, NULL, 'Wrong value for access mode', NULL, NULL);

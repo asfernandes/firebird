@@ -123,12 +123,16 @@ const USHORT rpb_long_tranum	= 1024;		// transaction number is 64-bit
 const USHORT RPB_s_update	= 0x01;	// input stream fetched for update
 const USHORT RPB_s_no_data	= 0x02;	// nobody is going to access the data
 const USHORT RPB_s_sweeper	= 0x04;	// garbage collector - skip swept pages
+const USHORT RPB_s_unstable = 0x08;	// don't use undo log, used with unstable explicit cursors
 
 // Runtime flags
 
-const USHORT RPB_refetch	= 0x01;	// re-fetch is required
-const USHORT RPB_undo_data	= 0x02;	// data got from undo log
-const USHORT RPB_undo_read	= 0x04;	// read was performed using the undo log
+const USHORT RPB_refetch		= 0x01;	// re-fetch is required
+const USHORT RPB_undo_data		= 0x02;	// data got from undo log
+const USHORT RPB_undo_read		= 0x04;	// read was performed using the undo log
+const USHORT RPB_undo_deleted	= 0x08;	// read was performed using the undo log, primary version is deleted
+
+const USHORT RPB_UNDO_FLAGS		= (RPB_undo_data | RPB_undo_read | RPB_undo_deleted);
 
 const unsigned int MAX_DIFFERENCES	= 1024;	// Max length of generated Differences string
 											// between two records
@@ -172,6 +176,7 @@ public:
 		  req_ext_stmt(NULL),
 		  req_cursors(*req_pool),
 		  req_ext_resultset(NULL),
+		  req_timeout(0),
 		  req_domain_validation(NULL),
 		  req_auto_trans(*req_pool),
 		  req_sorts(*req_pool),
@@ -246,8 +251,11 @@ public:
 	ExtEngineManager::ResultSet*	req_ext_resultset;	// external result set
 	USHORT		req_label;				// label for leave
 	ULONG		req_flags;				// misc request flags
+	Savepoint*	req_savepoints;			// Looper savepoint list
 	Savepoint*	req_proc_sav_point;		// procedure savepoint list
 	Firebird::TimeStamp	req_timestamp;	// Start time of request
+	unsigned int req_timeout;					// query timeout in milliseconds, set by the dsql_req::setupTimer
+	Firebird::RefPtr<TimeoutTimer> req_timer;	// timeout timer, shared with dsql_req
 
 	Firebird::AutoPtr<Jrd::RuntimeStatistics> req_fetch_baseline; // State of request performance counters when we reported it last time
 	SINT64 req_fetch_elapsed;	// Number of clock ticks spent while fetching rows for this request since we reported it last time
@@ -277,6 +285,7 @@ public:
 	} req_operation;				// operation for next node
 
 	StatusXcp req_last_xcp;			// last known exception
+	bool req_batch;
 
 	template <typename T> T* getImpure(unsigned offset)
 	{

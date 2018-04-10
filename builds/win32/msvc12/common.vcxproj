@@ -25,6 +25,7 @@
     <ClCompile Include="..\..\..\src\common\CharSet.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\alloc.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\BaseStream.cpp" />
+    <ClCompile Include="..\..\..\src\common\classes\BlobWrapper.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\BlrWriter.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\ClumpletReader.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\ClumpletWriter.cpp" />
@@ -45,6 +46,7 @@
     <ClCompile Include="..\..\..\src\common\classes\SyncObject.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\TempFile.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\timestamp.cpp" />
+    <ClCompile Include="..\..\..\src\common\classes\TomCryptHash.cpp" />
     <ClCompile Include="..\..\..\src\common\classes\UserBlob.cpp" />
     <ClCompile Include="..\..\..\src\common\config\config.cpp" />
     <ClCompile Include="..\..\..\src\common\config\ConfigCache.cpp" />
@@ -58,6 +60,7 @@
     </ClCompile>
     <ClCompile Include="..\..\..\src\common\cvt.cpp" />
     <ClCompile Include="..\..\..\src\common\db_alias.cpp" />
+    <ClCompile Include="..\..\..\src\common\DecFloat.cpp" />
     <ClCompile Include="..\..\..\src\common\dllinst.cpp" />
     <ClCompile Include="..\..\..\src\common\dsc.cpp" />
     <ClCompile Include="..\..\..\src\common\DynamicStrings.cpp" />
@@ -103,6 +106,8 @@
     <ClInclude Include="..\..\..\src\common\classes\array.h" />
     <ClInclude Include="..\..\..\src\common\classes\auto.h" />
     <ClInclude Include="..\..\..\src\common\classes\BaseStream.h" />
+    <ClInclude Include="..\..\..\src\common\classes\BatchCompletionState.h" />
+    <ClInclude Include="..\..\..\src\common\classes\BlobWrapper.h" />
     <ClInclude Include="..\..\..\src\common\classes\BlrReader.h" />
     <ClInclude Include="..\..\..\src\common\classes\BlrWriter.h" />
     <ClInclude Include="..\..\..\src\common\classes\ByteChunk.h" />
@@ -154,6 +159,7 @@
     <ClInclude Include="..\..\..\src\common\CsConvert.h" />
     <ClInclude Include="..\..\..\src\common\cvt.h" />
     <ClInclude Include="..\..\..\src\common\db_alias.h" />
+    <ClInclude Include="..\..\..\src\common\DecFloat.h" />
     <ClInclude Include="..\..\..\src\common\dllinst.h" />
     <ClInclude Include="..\..\..\src\common\dsc.h" />
     <ClInclude Include="..\..\..\src\common\dsc_proto.h" />
@@ -283,7 +289,7 @@
       <Culture>0x041d</Culture>
     </ResourceCompile>
     <Lib>
-      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\Release\tommath.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\$(Configuration)\tommath.lib;../../../extern/libtomcrypt/lib/$(PlatformName)\$(Configuration)\tomcrypt.lib;../../../extern/decNumber/lib/$(PlatformName)\$(Configuration)\decnumber.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -299,7 +305,7 @@
       <Culture>0x041d</Culture>
     </ResourceCompile>
     <Lib>
-      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\Debug\tommath.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\$(Configuration)\tommath.lib;../../../extern/libtomcrypt/lib/$(PlatformName)\$(Configuration)\tomcrypt.lib;../../../extern/decNumber/lib/$(PlatformName)\$(Configuration)\decnumber.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -318,7 +324,7 @@
       <Culture>0x041d</Culture>
     </ResourceCompile>
     <Lib>
-      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\Release\tommath.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\$(Configuration)\tommath.lib;../../../extern/libtomcrypt/lib/$(PlatformName)\$(Configuration)\tomcrypt.lib;../../../extern/decNumber/lib/$(PlatformName)\$(Configuration)\decnumber.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -336,7 +342,7 @@
       <Culture>0x041d</Culture>
     </ResourceCompile>
     <Lib>
-      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\Debug\tommath.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;../../../extern/libtommath/lib/$(PlatformName)\$(Configuration)\tommath.lib;../../../extern/libtomcrypt/lib/$(PlatformName)\$(Configuration)\tomcrypt.lib;../../../extern/decNumber/lib/$(PlatformName)\$(Configuration)\decnumber.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -49,6 +49,7 @@ class YRequest;
 class YResultSet;
 class YService;
 class YStatement;
+class IscStatement;
 class YTransaction;
 
 class YObject
@@ -98,10 +99,13 @@ public:
 	void destroy(unsigned dstrFlags)
 	{
 		Firebird::MutexLockGuard guard(mtx, FB_FUNCTION);
-		FB_SIZE_T i;
 
-		while ((i = array.getCount()) > 0)
-			array[i - 1]->destroy(dstrFlags);
+		// Call destroy() only once even if handle is not removed from array
+		// by this call for any reason
+		for (int i = array.getCount() - 1; i >= 0; i--)
+			array[i]->destroy(dstrFlags);
+
+		clear();
 	}
 
 	void assign(HandleArray& from)
@@ -121,7 +125,7 @@ private:
 };
 
 template <typename Impl, typename Intf>
-class YHelper : public Firebird::StdPlugin<Intf>, public YObject
+class YHelper : public Firebird::RefCntIface<Intf>, public YObject
 {
 public:
 	typedef typename Intf::Declaration NextInterface;
@@ -129,10 +133,15 @@ public:
 
 	static const unsigned DF_RELEASE =		0x1;
 
-	explicit YHelper(NextInterface* aNext);
+	explicit YHelper(NextInterface* aNext
+#ifdef DEV_BUILD
+										, const char* m = NULL
+#endif
+										);
 
 	int release()
 	{
+		Firebird::RefCntIface<Intf>::refCntDPrt('-');
 		int rc = --(this->refCounter);
 		if (rc == 0)
 		{
@@ -201,14 +210,14 @@ public:
 
 	// IRequest implementation
 	void receive(Firebird::CheckStatusWrapper* status, int level, unsigned int msgType,
-		unsigned int length, unsigned char* message);
+		unsigned int length, void* message);
 	void send(Firebird::CheckStatusWrapper* status, int level, unsigned int msgType,
-		unsigned int length, const unsigned char* message);
+		unsigned int length, const void* message);
 	void getInfo(Firebird::CheckStatusWrapper* status, int level, unsigned int itemsLength,
 		const unsigned char* items, unsigned int bufferLength, unsigned char* buffer);
 	void start(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction, int level);
 	void startAndSend(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction, int level,
-		unsigned int msgType, unsigned int length, const unsigned char* message);
+		unsigned int msgType, unsigned int length, const void* message);
 	void unwind(Firebird::CheckStatusWrapper* status, int level);
 	void free(Firebird::CheckStatusWrapper* status);
 
@@ -326,6 +335,34 @@ public:
 	YStatement* statement;
 };
 
+class YBatch FB_FINAL :
+	public YHelper<YBatch, Firebird::IBatchImpl<YBatch, Firebird::CheckStatusWrapper> >
+{
+public:
+	static const ISC_STATUS ERROR_CODE = isc_bad_result_set;	// isc_bad_batch
+
+	YBatch(YAttachment* anAttachment, Firebird::IBatch* aNext);
+
+	void destroy(unsigned dstrFlags);
+
+	// IBatch implementation
+	void add(Firebird::CheckStatusWrapper* status, unsigned count, const void* inBuffer);
+	void addBlob(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer, ISC_QUAD* blobId,
+		unsigned parLength, const unsigned char* par);
+	void appendBlobData(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer);
+	void addBlobStream(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer);
+	unsigned getBlobAlignment(Firebird::CheckStatusWrapper* status);
+	Firebird::IMessageMetadata* getMetadata(Firebird::CheckStatusWrapper* status);
+	void registerBlob(Firebird::CheckStatusWrapper* status, const ISC_QUAD* existingBlob, ISC_QUAD* blobId);
+	Firebird::IBatchCompletionState* execute(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction);
+	void cancel(Firebird::CheckStatusWrapper* status);
+	void setDefaultBpb(Firebird::CheckStatusWrapper* status, unsigned parLength, const unsigned char* par);
+
+public:
+	YAttachment* attachment;
+};
+
+
 class YMetadata
 {
 public:
@@ -369,6 +406,11 @@ public:
 	void setCursorName(Firebird::CheckStatusWrapper* status, const char* name);
 	void free(Firebird::CheckStatusWrapper* status);
 	unsigned getFlags(Firebird::CheckStatusWrapper* status);
+
+	unsigned int getTimeout(Firebird::CheckStatusWrapper* status);
+	void setTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	YBatch* createBatch(Firebird::CheckStatusWrapper* status, Firebird::IMessageMetadata* inMetadata,
+		unsigned parLength, const unsigned char* par);
 
 public:
 	Firebird::Mutex statementMutex;
@@ -461,6 +503,14 @@ public:
 		Firebird::IMessageMetadata* inMetadata, void* inBuffer,
 		Firebird::IMessageMetadata* outMetadata, void* outBuffer);
 
+	unsigned int getIdleTimeout(Firebird::CheckStatusWrapper* status);
+	void setIdleTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	unsigned int getStatementTimeout(Firebird::CheckStatusWrapper* status);
+	void setStatementTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	YBatch* createBatch(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction,
+		unsigned stmtLength, const char* sqlStmt, unsigned dialect,
+		Firebird::IMessageMetadata* inMetadata, unsigned parLength, const unsigned char* par);
+
 public:
 	Firebird::IProvider* provider;
 	Firebird::PathName dbPath;
@@ -468,6 +518,7 @@ public:
 	HandleArray<YEvents> childEvents;
 	HandleArray<YRequest> childRequests;
 	HandleArray<YStatement> childStatements;
+	HandleArray<IscStatement> childIscStatements;
 	HandleArray<YTransaction> childTransactions;
 	Firebird::Array<CleanupCallback*> cleanupHandlers;
 	Firebird::StatusHolder savedStatus;	// Do not use raise() method of this class in yValve.
@@ -570,6 +621,8 @@ public:
 	unsigned setOffsets(Firebird::CheckStatusWrapper* status, Firebird::IMessageMetadata* metadata,
 		Firebird::IOffsetsCallback* callback);
 	Firebird::IEventBlock* createEventBlock(Firebird::CheckStatusWrapper* status, const char** events);
+	Firebird::IDecFloat16* getDecFloat16(Firebird::CheckStatusWrapper* status);
+	Firebird::IDecFloat34* getDecFloat34(Firebird::CheckStatusWrapper* status);
 };
 
 }	// namespace Why

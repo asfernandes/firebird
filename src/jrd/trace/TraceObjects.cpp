@@ -182,7 +182,7 @@ const char* TraceSQLStatementImpl::getTextUTF8()
 
 	if (m_textUTF8.isEmpty() && stmtText && !stmtText->isEmpty())
 	{
-		if (!DataTypeUtil::convertToUTF8(*stmtText, m_textUTF8))
+		if (!DataTypeUtil::convertToUTF8(*stmtText, m_textUTF8, CS_dynamic, status_exception::raise))
 			return stmtText->c_str();
 	}
 
@@ -280,6 +280,43 @@ const dsc* TraceSQLStatementImpl::DSQLParamsImpl::getParam(FB_SIZE_T idx)
 	return NULL;
 }
 
+const char* TraceSQLStatementImpl::DSQLParamsImpl::getTextUTF8(CheckStatusWrapper* status, FB_SIZE_T idx)
+{
+	const dsc* param = getParam(idx);
+	UCHAR* address;
+	USHORT length;
+
+	switch (param->dsc_dtype)
+	{
+	case dtype_text:
+		address = param->dsc_address;
+		length = param->dsc_length;
+		break;
+
+	case dtype_varying:
+		address = param->dsc_address + sizeof(USHORT);
+		length = *(USHORT*) param->dsc_address;
+		break;
+
+	default:
+		return NULL;
+	}
+
+	string src(address, length);
+
+	try
+	{
+		if (!DataTypeUtil::convertToUTF8(src, temp_utf8_text, param->dsc_sub_type, status_exception::raise))
+			temp_utf8_text = src;
+	}
+	catch (const Firebird::Exception&)
+	{
+		temp_utf8_text = src;
+	}
+
+	return temp_utf8_text.c_str();
+}
+
 
 /// TraceFailedSQLStatement
 
@@ -287,7 +324,7 @@ const char* TraceFailedSQLStatement::getTextUTF8()
 {
 	if (m_textUTF8.isEmpty() && !m_text.isEmpty())
 	{
-		if (!DataTypeUtil::convertToUTF8(m_text, m_textUTF8))
+		if (!DataTypeUtil::convertToUTF8(m_text, m_textUTF8, CS_dynamic, status_exception::raise))
 			return m_text.c_str();
 	}
 
@@ -305,6 +342,43 @@ FB_SIZE_T TraceParamsImpl::getCount()
 const dsc* TraceParamsImpl::getParam(FB_SIZE_T idx)
 {
 	return m_descs->getParam(idx);
+}
+
+const char* TraceParamsImpl::getTextUTF8(CheckStatusWrapper* status, FB_SIZE_T idx)
+{
+	const dsc* param = getParam(idx);
+	UCHAR* address;
+	USHORT length;
+
+	switch (param->dsc_dtype)
+	{
+	case dtype_text:
+		address = param->dsc_address;
+		length = param->dsc_length;
+		break;
+
+	case dtype_varying:
+		address = param->dsc_address + sizeof(USHORT);
+		length = *(USHORT*) param->dsc_address;
+		break;
+
+	default:
+		return NULL;
+	}
+
+	string src(address, length);
+
+	try
+	{
+		if (!DataTypeUtil::convertToUTF8(src, temp_utf8_text, param->dsc_sub_type, status_exception::raise))
+			temp_utf8_text = src;
+	}
+	catch (const Firebird::Exception&)
+	{
+		temp_utf8_text = src;
+	}
+
+	return temp_utf8_text.c_str();
 }
 
 
@@ -330,7 +404,7 @@ void TraceDscFromValues::fillParams()
 		const VariableNode* var;
 		const LiteralNode* literal;
 
-		if ((param = prm->as<ParameterNode>()))
+		if ((param = nodeAs<ParameterNode>(prm)))
 		{
 			//const impure_value* impure = m_request->getImpure<impure_value>(param->impureOffset)
 			const MessageNode* message = param->message;
@@ -346,18 +420,18 @@ void TraceDscFromValues::fillParams()
 			if (param->argFlag)
 			{
 				const dsc* flag = EVL_expr(tdbb, m_request, param->argFlag);
-				if (MOV_get_long(flag, 0))
+				if (MOV_get_long(tdbb, flag, 0))
 					desc.dsc_flags |= DSC_null;
 			}
 		}
-		else if ((var = prm->as<VariableNode>()))
+		else if ((var = nodeAs<VariableNode>(prm)))
 		{
 			impure_value* impure = m_request->getImpure<impure_value>(var->impureOffset);
 			from_desc = &impure->vlu_desc;
 		}
-		else if ((literal = prm->as<LiteralNode>()))
+		else if ((literal = nodeAs<LiteralNode>(prm)))
 			from_desc = &literal->litDesc;
-		else if (prm->is<NullNode>())
+		else if (nodeIs<NullNode>(prm))
 		{
 			desc.clear();
 			desc.setNull();

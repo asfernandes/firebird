@@ -254,13 +254,14 @@ void dump(CheckStatusWrapper* status, ISC_QUAD* blobId, IAttachment* att, ITrans
 	SCHAR buffer[256];
 	const SSHORT short_length = sizeof(buffer);
 
-	for (;;)
+	for (bool cond = true; cond; )
 	{
 		unsigned l = 0;
 		switch (blob->getSegment(status, short_length, buffer, &l))
 		{
 		case Firebird::IStatus::RESULT_ERROR:
 		case Firebird::IStatus::RESULT_NO_DATA:
+			cond = false;
 			break;
 		}
 
@@ -738,6 +739,7 @@ public:
 		: pb(NULL), strVal(getPool())
 	{
 		ClumpletReader::Kind k;
+		UCHAR tag = 0;
 		const ClumpletReader::KindList* kl = NULL;
 
 		switch(kind)
@@ -753,9 +755,18 @@ public:
 			break;
 		case TPB:
 			k = ClumpletReader::Tpb;
+			tag = isc_tpb_version3;
+			break;
+		case BATCH:
+			k = ClumpletReader::WideTagged;
+			tag = IBatch::VERSION1;
+			break;
+		case BPB:
+			k = ClumpletReader::Tagged;
+			tag = isc_bpb_version1;
 			break;
 		default:
-			fatal_exception::raiseFmt("Wrong parameters block kind %d, should be from %d to %d", kind, DPB, TPB);
+			fatal_exception::raiseFmt("Wrong parameters block kind %d, should be from %d to %d", kind, DPB, BPB);
 			break;
 		}
 
@@ -764,7 +775,7 @@ public:
 			if (kl)
 				pb = FB_NEW_POOL(getPool()) ClumpletWriter(getPool(), kl, MAX_DPB_SIZE);
 			else
-				pb = FB_NEW_POOL(getPool()) ClumpletWriter(getPool(), k, MAX_DPB_SIZE);
+				pb = FB_NEW_POOL(getPool()) ClumpletWriter(getPool(), k, MAX_DPB_SIZE, tag);
 		}
 		else
 		{
@@ -1052,6 +1063,128 @@ IXpbBuilder* UtilInterface::getXpbBuilder(CheckStatusWrapper* status,
 		ex.stuffException(status);
 		return NULL;
 	}
+}
+
+class DecFloat16 FB_FINAL : public AutoIface<IDecFloat16Impl<DecFloat16, CheckStatusWrapper> >
+{
+public:
+	// IDecFloat16 implementation
+	void toBcd(const FB_DEC16* from, int* sign, unsigned char* bcd, int* exp)
+	{
+		*sign = decDoubleToBCD(reinterpret_cast<const decDouble*>(from), exp, bcd);
+	}
+
+	void toString(CheckStatusWrapper* status, const FB_DEC16* from, unsigned bufSize, char* buffer)
+	{
+		try
+		{
+			if (bufSize >= STRING_SIZE)
+				decDoubleToString(reinterpret_cast<const decDouble*>(from), buffer);
+			else
+			{
+				char temp[STRING_SIZE];
+				decDoubleToString(reinterpret_cast<const decDouble*>(from), temp);
+				unsigned int len = strlen(temp);
+				if (len < bufSize)
+					strncpy(buffer, temp, bufSize);
+				else
+				{
+					(Arg::Gds(isc_arith_except) << Arg::Gds(isc_string_truncation) <<
+					 Arg::Gds(isc_trunc_limits) << Arg::Num(bufSize) << Arg::Num(len));
+				}
+			}
+		}
+		catch (const Exception& ex)
+		{
+			ex.stuffException(status);
+		}
+	}
+
+	void fromBcd(int sign, const unsigned char* bcd, int exp, FB_DEC16* to)
+	{
+		decDoubleFromBCD(reinterpret_cast<decDouble*>(to), exp, bcd, sign ? DECFLOAT_Sign : 0);
+	}
+
+	void fromString(CheckStatusWrapper* status, const char* from, FB_DEC16* to)
+	{
+		try
+		{
+			DecimalStatus decSt(FB_DEC_Errors);
+			Decimal64* val = reinterpret_cast<Decimal64*>(to);
+			val->set(from, decSt);
+		}
+		catch (const Exception& ex)
+		{
+			ex.stuffException(status);
+		}
+	}
+};
+
+IDecFloat16* UtilInterface::getDecFloat16(CheckStatusWrapper* status)
+{
+	static DecFloat16 decFloat16;
+	return &decFloat16;
+}
+
+class DecFloat34 FB_FINAL : public AutoIface<IDecFloat34Impl<DecFloat34, CheckStatusWrapper> >
+{
+public:
+	// IDecFloat34 implementation
+	void toBcd(const FB_DEC34* from, int* sign, unsigned char* bcd, int* exp)
+	{
+		*sign = decQuadToBCD(reinterpret_cast<const decQuad*>(from), exp, bcd);
+	}
+
+	void toString(CheckStatusWrapper* status, const FB_DEC34* from, unsigned bufSize, char* buffer)
+	{
+		try
+		{
+			if (bufSize >= STRING_SIZE)
+				decQuadToString(reinterpret_cast<const decQuad*>(from), buffer);
+			else
+			{
+				char temp[STRING_SIZE];
+				decQuadToString(reinterpret_cast<const decQuad*>(from), temp);
+				unsigned int len = strlen(temp);
+				if (len < bufSize)
+					strncpy(buffer, temp, bufSize);
+				else
+				{
+					(Arg::Gds(isc_arith_except) << Arg::Gds(isc_string_truncation) <<
+					 Arg::Gds(isc_trunc_limits) << Arg::Num(bufSize) << Arg::Num(len));
+				}
+			}
+		}
+		catch (const Exception& ex)
+		{
+			ex.stuffException(status);
+		}
+	}
+
+	void fromBcd(int sign, const unsigned char* bcd, int exp, FB_DEC34* to)
+	{
+		decQuadFromBCD(reinterpret_cast<decQuad*>(to), exp, bcd, sign ? DECFLOAT_Sign : 0);
+	}
+
+	void fromString(CheckStatusWrapper* status, const char* from, FB_DEC34* to)
+	{
+		try
+		{
+			DecimalStatus decSt(FB_DEC_Errors);
+			Decimal128* val = reinterpret_cast<Decimal128*>(to);
+			val->set(from, decSt);
+		}
+		catch (const Exception& ex)
+		{
+			ex.stuffException(status);
+		}
+	}
+};
+
+IDecFloat34* UtilInterface::getDecFloat34(CheckStatusWrapper* status)
+{
+	static DecFloat34 decFloat34;
+	return &decFloat34;
 }
 
 unsigned UtilInterface::setOffsets(CheckStatusWrapper* status, IMessageMetadata* metadata,

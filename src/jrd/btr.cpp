@@ -1312,8 +1312,32 @@ idx_e BTR_key(thread_db* tdbb, jrd_rel* relation, Record* record, index_desc* id
 	}	// try
 	catch (const Exception& ex)
 	{
-		ex.stuffException(tdbb->tdbb_status_vector);
+		if (!(tdbb->tdbb_flags & TDBB_sys_error))
+		{
+			Arg::StatusVector error(ex);
+
+			if (!(error.length() > 1 &&
+				  error.value()[0] == isc_arg_gds &&
+				  error.value()[1] == isc_expression_eval_index))
+			{
+				MetaName indexName;
+				MET_lookup_index(tdbb, indexName, relation->rel_name, idx->idx_id + 1);
+
+				if (indexName.isEmpty())
+					indexName = "***unknown***";
+
+				error.prepend(Arg::Gds(isc_expression_eval_index) <<
+					Arg::Str(indexName) <<
+					Arg::Str(relation->rel_name));
+			}
+
+			error.copyTo(tdbb->tdbb_status_vector);
+		}
+		else
+			ex.stuffException(tdbb->tdbb_status_vector);
+
 		key->key_length = 0;
+
 		return (tdbb->tdbb_flags & TDBB_sys_error) ? idx_e_interrupt : idx_e_conversion;
 	}
 
@@ -1373,6 +1397,10 @@ USHORT BTR_key_length(thread_db* tdbb, jrd_rel* relation, index_desc* idx)
 			length = sizeof(UCHAR);
 			break;
 
+		case idx_decimal:
+			length = Decimal128::getIndexKeyLength();
+			break;
+
 		default:
 			if (idx->idx_flags & idx_expressn)
 			{
@@ -1424,6 +1452,9 @@ USHORT BTR_key_length(thread_db* tdbb, jrd_rel* relation, index_desc* idx)
 			break;
 		case idx_boolean:
 			length = sizeof(UCHAR);
+			break;
+		case idx_decimal:
+			length = Decimal128::getIndexKeyLength();
 			break;
 		default:
 			length = format->fmt_desc[tail->idx_field].dsc_length;
@@ -2015,6 +2046,9 @@ void BTR_selectivity(thread_db* tdbb, jrd_rel* relation, USHORT id, SelectivityL
 		return;
 	}
 
+	const bool descending = (root->irt_rpt[id].irt_flags & irt_descending);
+	const ULONG segments = root->irt_rpt[id].irt_keys;
+
 	window.win_flags = WIN_large_scan;
 	window.win_scans = 1;
 	btree_page* bucket = (btree_page*) CCH_HANDOFF(tdbb, &window, page, LCK_read, pag_index);
@@ -2037,8 +2071,6 @@ void BTR_selectivity(thread_db* tdbb, jrd_rel* relation, USHORT id, SelectivityL
 	key.key_length = 0;
 	SSHORT l;
 	bool firstNode = true;
-	const bool descending = (root->irt_rpt[id].irt_flags & irt_descending);
-	const ULONG segments = root->irt_rpt[id].irt_keys;
 
 	// SSHORT count, stuff_count, pos, i;
 	HalfStaticArray<FB_UINT64, 4> duplicatesList;
@@ -2423,7 +2455,7 @@ static void compress(thread_db* tdbb,
 	}
 
 	if (itype == idx_string || itype == idx_byte_array || itype == idx_metadata ||
-		itype >= idx_first_intl_string)
+		itype == idx_decimal || itype >= idx_first_intl_string)
 	{
 		VaryStr<MAX_KEY> buffer;
 		const UCHAR pad = (itype == idx_string) ? ' ' : 0;
@@ -2431,7 +2463,13 @@ static void compress(thread_db* tdbb,
 
 		size_t length;
 
-		if (itype >= idx_first_intl_string || itype == idx_metadata)
+		if (itype == idx_decimal)
+		{
+			Decimal128 dec = MOV_get_dec128(tdbb, desc);
+			length = dec.makeIndexKey(&buffer);
+			ptr = reinterpret_cast<UCHAR*>(buffer.vary_string);
+		}
+		else if (itype >= idx_first_intl_string || itype == idx_metadata)
 		{
 			DSC to;
 
@@ -2446,7 +2484,7 @@ static void compress(thread_db* tdbb,
 			length = INTL_string_to_key(tdbb, itype, desc, &to, key_type);
 		}
 		else
-			length = MOV_get_string(desc, &ptr, &buffer, MAX_KEY);
+			length = MOV_get_string(tdbb, desc, &ptr, &buffer, MAX_KEY);
 
 		if (length)
 		{
@@ -2500,7 +2538,7 @@ static void compress(thread_db* tdbb,
 
 	if (itype == idx_numeric)
 	{
-		temp.temp_double = MOV_get_double(desc);
+		temp.temp_double = MOV_get_double(tdbb, desc);
 		temp_is_negative = (temp.temp_double < 0);
 
 #ifdef DEBUG_INDEXKEY
@@ -2510,7 +2548,7 @@ static void compress(thread_db* tdbb,
 	else if (itype == idx_numeric2)
 	{
 		int64_key_op = true;
-		temp.temp_int64_key = make_int64_key(MOV_get_int64(desc, desc->dsc_scale), desc->dsc_scale);
+		temp.temp_int64_key = make_int64_key(MOV_get_int64(tdbb, desc, desc->dsc_scale), desc->dsc_scale);
 		temp_copy_length = sizeof(temp.temp_int64_key.d_part);
 		temp_is_negative = (temp.temp_int64_key.d_part < 0);
 
@@ -2585,7 +2623,7 @@ static void compress(thread_db* tdbb,
 	}
 	else
 	{
-		temp.temp_double = MOV_get_double(desc);
+		temp.temp_double = MOV_get_double(tdbb, desc);
 		temp_is_negative = (temp.temp_double < 0);
 
 #ifdef DEBUG_INDEXKEY
@@ -5140,7 +5178,7 @@ static void generate_jump_nodes(thread_db* tdbb, btree_page* page,
 			// more difficult then needed.
 			jumpNode.offset = node.nodePointer - (UCHAR*) page;
 			jumpNode.prefix = IndexNode::computePrefix(jumpData, jumpLength,
-														   currentData, node.prefix);
+													   currentData, node.prefix);
 			jumpNode.length = node.prefix - jumpNode.prefix;
 
 			// make sure split page has enough space for new jump node
@@ -5177,17 +5215,14 @@ static void generate_jump_nodes(thread_db* tdbb, btree_page* page,
 			}
 
 			// Set new position for generating jumpnode
-			if (newAreaPosition < halfpoint && newAreaPosition + jumpAreaSize >= halfpoint)
-				newAreaPosition = halfpoint;
-			else
-				newAreaPosition += jumpAreaSize;
+			newAreaPosition += jumpAreaSize;
 
 			*jumpersSize += jumpNode.getJumpNodeSize();
 
 			if (splitIndex && *splitIndex < jumpNodes->getCount())
 			{
 				splitPageSize += jumpNode.getJumpNodeSize();
-				if (*splitIndex + 1 == jumpNodes->getCount())
+				if (*splitIndex + 1u == jumpNodes->getCount())
 					splitPageSize += jumpNode.prefix;
 			}
 		}
@@ -5913,76 +5948,7 @@ string print_key(thread_db* tdbb, jrd_rel* relation, index_desc* idx, Record* re
 		MET_scan_relation(tdbb, relation);
 	}
 
-	class Printer
-	{
-	public:
-		explicit Printer(thread_db* tdbb, const dsc* desc)
-		{
-			const int MAX_KEY_STRING_LEN = 250;
-			const char* const NULL_KEY_STRING = "NULL";
-
-			if (!desc)
-			{
-				value = NULL_KEY_STRING;
-				return;
-			}
-
-			fb_assert(!desc->isBlob());
-
-			value = MOV_make_string2(tdbb, desc, ttype_dynamic);
-
-			const int len = (int) value.length();
-			const char* const str = value.c_str();
-
-			if (desc->isText() || desc->isDateTime())
-			{
-				if (desc->dsc_dtype == dtype_text)
-				{
-					const char* const pad = (desc->dsc_sub_type == ttype_binary) ? "\0": " ";
-					value.rtrim(pad);
-				}
-
-				if (desc->isText() && desc->getTextType() == ttype_binary)
-				{
-					string hex;
-					char* s = hex.getBuffer(2 * len);
-					for (int i = 0; i < len; i++)
-					{
-						sprintf(s, "%02X", (int) (unsigned char) str[i]);
-						s += 2;
-					}
-					value = "x'" + hex + "'";
-				}
-				else
-				{
-					value = "'" + value + "'";
-				}
-			}
-
-			if (value.length() > MAX_KEY_STRING_LEN)
-			{
-				fb_assert(desc->isText());
-
-				value.resize(MAX_KEY_STRING_LEN);
-
-				const CharSet* const cs = INTL_charset_lookup(tdbb, desc->getCharSet());
-
-				while (value.hasData() && !cs->wellFormed(value.length(), (const UCHAR*) value.c_str()))
-					value.resize(value.length() - 1);
-
-				value += "...";
-			}
-		}
-
-		const string& get() const
-		{
-			return value;
-		}
-
-	private:
-		string value;
-	};
-
+	const int MAX_KEY_STRING_LEN = 250;
 	string key, value;
 
 	try
@@ -5991,7 +5957,7 @@ string print_key(thread_db* tdbb, jrd_rel* relation, index_desc* idx, Record* re
 		{
 			bool notNull = false;
 			const dsc* const desc = BTR_eval_expression(tdbb, idx, record, notNull);
-			value = Printer(tdbb, notNull ? desc : NULL).get();
+			value = DescPrinter(tdbb, notNull ? desc : NULL, MAX_KEY_STRING_LEN).get();
 			key += "<expression> = " + value;
 		}
 		else
@@ -6010,7 +5976,7 @@ string print_key(thread_db* tdbb, jrd_rel* relation, index_desc* idx, Record* re
 
 				dsc desc;
 				const bool notNull = EVL_field(relation, record, field_id, &desc);
-				value = Printer(tdbb, notNull ? &desc : NULL).get();
+				value = DescPrinter(tdbb, notNull ? &desc : NULL, MAX_KEY_STRING_LEN).get();
 				key += " = " + value;
 
 				if (i < idx->idx_count - 1)

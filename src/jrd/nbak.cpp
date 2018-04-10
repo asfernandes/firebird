@@ -100,8 +100,15 @@ void NBackupStateLock::invalidate(thread_db* tdbb)
 
 void NBackupStateLock::blockingAstHandler(thread_db* tdbb)
 {
-	const bool wasWrite = (cachedLock->lck_physical == LCK_write);
+	// master instance should not try to acquire localStateLock or enter "flush" mode
+	if (backup_manager->isMaster())
+	{
+		GlobalRWLock::blockingAstHandler(tdbb);
+		return;
+	}
 
+	// Ensure we have no dirty pages in local cache before releasing
+	// of state lock
 	if (!backup_manager->databaseFlushInProgress())
 	{
 		backup_manager->beginFlush();
@@ -112,10 +119,19 @@ void NBackupStateLock::blockingAstHandler(thread_db* tdbb)
 		NBAK_TRACE_AST(("database FLUSHED"));
 	}
 
+	{	// scope
+		Firebird::MutexUnlockGuard counterGuard(counterMutex, FB_FUNCTION);
+		backup_manager->stateBlocking = !backup_manager->localStateLock.tryBeginWrite(FB_FUNCTION);
+		if (backup_manager->stateBlocking)
+			return;
+	}
+
 	GlobalRWLock::blockingAstHandler(tdbb);
 
-	if (wasWrite && (cachedLock->lck_physical == LCK_read))
+	if (cachedLock->lck_physical == LCK_read)
 		backup_manager->endFlush();
+
+	backup_manager->localStateLock.endWrite();
 }
 
 
@@ -151,14 +167,19 @@ BackupManager::StateWriteGuard::StateWriteGuard(thread_db* tdbb, Jrd::WIN* windo
 	dbb->dbb_backup_manager->beginFlush();
 	CCH_flush(tdbb, FLUSH_ALL, 0); // Flush local cache to release all dirty pages
 
-	if (!att->backupStateWriteLock(tdbb, LCK_WAIT))
+	CCH_FETCH(tdbb, window, LCK_write, pag_header);
+
+	dbb->dbb_backup_manager->localStateLock.beginWrite(FB_FUNCTION);
+
+	if (!dbb->dbb_backup_manager->lockStateWrite(tdbb, LCK_WAIT))
+	{
+		dbb->dbb_backup_manager->localStateLock.endWrite();
 		ERR_bugcheck_msg("Can't lock state for write");
+	}
 
 	dbb->dbb_backup_manager->endFlush();
 
 	NBAK_TRACE(("backup state locked for write"));
-	CCH_FETCH(tdbb, window, LCK_write, pag_header);
-
 	m_window = window;
 }
 
@@ -179,7 +200,8 @@ BackupManager::StateWriteGuard::~StateWriteGuard()
 	}
 
 	releaseHeader();
-	att->backupStateWriteUnLock(m_tdbb);
+	dbb->dbb_backup_manager->unlockStateWrite(m_tdbb);
+	dbb->dbb_backup_manager->localStateLock.endWrite();
 }
 
 void BackupManager::StateWriteGuard::releaseHeader()
@@ -232,6 +254,8 @@ void BackupManager::beginBackup(thread_db* tdbb)
 	if ((!explicit_diff_name) && database->onRawDevice()) {
 		ERR_post(Arg::Gds(isc_need_difference));
 	}
+
+	MasterGuard masterGuard(*this);
 
 	WIN window(HEADER_PAGE_NUMBER);
 
@@ -348,41 +372,18 @@ ULONG BackupManager::getPageCount(thread_db* tdbb)
 		return 0;
 	}
 
-	class PioCount : public Jrd::PageCountCallback
-	{
-	private:
-	    BufferDesc temp_bdb;
-		PageSpace* pageSpace;
-
-	public:
-		explicit PioCount(Database* dbb)
-			: temp_bdb(dbb->dbb_bcb)
-		{
-			pageSpace = dbb->dbb_page_manager.findPageSpace(DB_PAGE_SPACE);
-			fb_assert(pageSpace);
-		}
-
-		virtual void newPage(thread_db* tdbb, const SLONG pageNum, Ods::pag* buf)
-		{
-			temp_bdb.bdb_buffer = buf;
-			temp_bdb.bdb_page = pageNum;
-			FbLocalStatus status;
-			// It's PIP - therefore no need to try to decrypt
-			if (!PIO_read(tdbb, pageSpace->file, &temp_bdb, temp_bdb.bdb_buffer, &status))
-			{
-				Firebird::status_exception::raise(&status);
-			}
-		}
-	};
-
-	PioCount pioCount(tdbb->getDatabase());
-
-	return PAG_page_count(tdbb, &pioCount);
+	return PAG_page_count(tdbb);
 }
 
 
 bool BackupManager::extendDatabase(thread_db* tdbb)
 {
+	if (!alloc_table)
+	{
+		LocalAllocWriteGuard localAllocGuard(this);
+		actualizeAlloc(tdbb, false);
+	}
+
 	ULONG maxPage = 0;
 	{
 		LocalAllocReadGuard localAllocGuard(this);
@@ -439,6 +440,8 @@ void BackupManager::endBackup(thread_db* tdbb, bool recover)
 		// Someboby holds write lock on LCK_backup_end. We need not to do end_backup
 		return;
 	}
+
+	MasterGuard masterGuard(*this);
 
 	// STEP 1. Change state in header to "merge"
 	WIN window(HEADER_PAGE_NUMBER);
@@ -540,6 +543,7 @@ void BackupManager::endBackup(thread_db* tdbb, bool recover)
 
 		if (all.getFirst())
 		{
+			int n = 0;
 			do {
 				if (--tdbb->tdbb_quantum < 0)
 					JRD_reschedule(tdbb, QUANTUM, true);
@@ -550,11 +554,17 @@ void BackupManager::endBackup(thread_db* tdbb, bool recover)
 				NBAK_TRACE(("Merge: page %d is fetched", all.current().db_page));
 				if (page->pag_scn != current_scn)
 				{
-					CCH_MARK(tdbb, &window2);
+					CCH_MARK_SYSTEM(tdbb, &window2);
 					NBAK_TRACE(("Merge: page %d is marked", all.current().db_page));
 				}
 				CCH_RELEASE(tdbb, &window2);
 				NBAK_TRACE(("Merge: page %d is released", all.current().db_page));
+
+				if (++n == 512)
+				{
+					CCH_flush(tdbb, FLUSH_SYSTEM, 0);
+					n = 0;
+				}
 			} while (all.getNext());
 		}
 
@@ -889,6 +899,7 @@ BackupManager::BackupManager(thread_db* tdbb, Database* _database, int ini_state
 	dbCreating(false), database(_database), diff_file(NULL), alloc_table(NULL),
 	last_allocated_page(0), current_scn(0), diff_name(*_database->dbb_permanent),
 	explicit_diff_name(false), flushInProgress(false), shutDown(false), allocIsValid(false),
+	master(false), stateBlocking(false),
 	stateLock(FB_NEW_POOL(*database->dbb_permanent) NBackupStateLock(tdbb, *database->dbb_permanent, this)),
 	allocLock(FB_NEW_POOL(*database->dbb_permanent) NBackupAllocLock(tdbb, *database->dbb_permanent, this))
 {

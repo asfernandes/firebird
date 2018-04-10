@@ -60,7 +60,7 @@ namespace Jrd {
 
 // Check the index for being an expression one and
 // matching both the given stream and the given expression tree
-bool checkExpressionIndex(const index_desc* idx, ValueExprNode* node, StreamType stream)
+bool checkExpressionIndex(CompilerScratch* csb, const index_desc* idx, ValueExprNode* node, StreamType stream)
 {
 	fb_assert(idx);
 
@@ -68,10 +68,10 @@ bool checkExpressionIndex(const index_desc* idx, ValueExprNode* node, StreamType
 	{
 		// The desired expression can be hidden inside a derived expression node,
 		// so try to recover it (see CORE-4118).
-		while (!idx->idx_expression->sameAs(node, true))
+		while (!idx->idx_expression->sameAs(csb, node, true))
 		{
-			DerivedExprNode* const derivedExpr = node->as<DerivedExprNode>();
-			CastNode* const cast = node->as<CastNode>();
+			DerivedExprNode* const derivedExpr = nodeAs<DerivedExprNode>(node);
+			CastNode* const cast = nodeAs<CastNode>(node);
 
 			if (derivedExpr)
 				node = derivedExpr->arg;
@@ -82,8 +82,8 @@ bool checkExpressionIndex(const index_desc* idx, ValueExprNode* node, StreamType
 		}
 
 		SortedStreamList exprStreams, nodeStreams;
-		idx->idx_expression->collectStreams(exprStreams);
-		node->collectStreams(nodeStreams);
+		idx->idx_expression->collectStreams(csb, exprStreams);
+		node->collectStreams(csb, nodeStreams);
 
 		if (exprStreams.getCount() == 1 && exprStreams[0] == 0 &&
 			nodeStreams.getCount() == 1 && nodeStreams[0] == stream)
@@ -472,30 +472,19 @@ InversionCandidate* OptimizerRetrieval::generateInversion()
 	{
 		InversionCandidateList inversions;
 
-		// Check for any DB_KEY comparisons
-		for (OptimizerBlk::opt_conjunct* tail = opt_begin; tail < opt_end; tail++)
-		{
-			BoolExprNode* const node = tail->opt_conjunct_node;
-
-			if (!(tail->opt_conjunct_flags & opt_conjunct_used) && node)
-			{
-				invCandidate = matchDbKey(node);
-
-				if (invCandidate)
-					inversions.add(invCandidate);
-			}
-		}
-
 		// First, handle "AND" comparisons (all nodes except OR)
 		for (OptimizerBlk::opt_conjunct* tail = opt_begin; tail < opt_end; tail++)
 		{
 			BoolExprNode* const node = tail->opt_conjunct_node;
-			BinaryBoolNode* booleanNode = node->as<BinaryBoolNode>();
+			BinaryBoolNode* booleanNode = nodeAs<BinaryBoolNode>(node);
 
 			if (!(tail->opt_conjunct_flags & opt_conjunct_used) && node &&
 				(!booleanNode || booleanNode->blrOp != blr_or))
 			{
-				matchOnIndexes(&indexScratches, node, 1);
+				invCandidate = matchOnIndexes(&indexScratches, node, 1);
+
+				if (invCandidate)
+					inversions.add(invCandidate);
 			}
 		}
 
@@ -505,7 +494,7 @@ InversionCandidate* OptimizerRetrieval::generateInversion()
 		for (OptimizerBlk::opt_conjunct* tail = opt_begin; tail < opt_end; tail++)
 		{
 			BoolExprNode* const node = tail->opt_conjunct_node;
-			BinaryBoolNode* booleanNode = node->as<BinaryBoolNode>();
+			BinaryBoolNode* booleanNode = nodeAs<BinaryBoolNode>(node);
 
 			if (!(tail->opt_conjunct_flags & opt_conjunct_used) && node &&
 				(booleanNode && booleanNode->blrOp == blr_or))
@@ -566,7 +555,7 @@ InversionCandidate* OptimizerRetrieval::generateInversion()
 			node->computable(csb, stream, true) &&
 			!invCandidate->matches.exist(node))
 		{
-			const ComparativeBoolNode* const cmpNode = node->as<ComparativeBoolNode>();
+			const ComparativeBoolNode* const cmpNode = nodeAs<ComparativeBoolNode>(node);
 
 			const double factor = (cmpNode && cmpNode->blrOp == blr_eql) ?
 				REDUCE_SELECTIVITY_FACTOR_EQUALITY : REDUCE_SELECTIVITY_FACTOR_INEQUALITY;
@@ -698,84 +687,113 @@ void OptimizerRetrieval::analyzeNavigation()
 		const index_desc::idx_repeat* idx_tail = idx->idx_rpt;
 		const index_desc::idx_repeat* const idx_end = idx_tail + idx->idx_count;
 		NestConst<ValueExprNode>* ptr = sort->expressions.begin();
-		const bool* descending = sort->descending.begin();
-		const int* nullOrder = sort->nullOrder.begin();
+		const SortDirection* direction = sort->direction.begin();
+		const NullsPlacement* nullOrder = sort->nullOrder.begin();
 
 		for (const NestConst<ValueExprNode>* const end = sort->expressions.end();
 			 ptr != end;
-			 ++ptr, ++descending, ++nullOrder, ++idx_tail)
+			 ++ptr, ++direction, ++nullOrder, ++idx_tail)
 		{
-			ValueExprNode* const node = *ptr;
+			ValueExprNode* const orgNode = *ptr;
 			FieldNode* fieldNode;
+			bool nodeMatched = false;
 
-			if (idx->idx_flags & idx_expressn)
-			{
-				if (!checkExpressionIndex(idx, node, stream))
-				{
-					usableIndex = false;
-					break;
-				}
-			}
-			else if (!(fieldNode = node->as<FieldNode>()) || fieldNode->fieldStream != stream)
-			{
-				usableIndex = false;
-				break;
-			}
-			else
-			{
-				for (; idx_tail < idx_end && fieldNode->fieldId != idx_tail->idx_field; idx_tail++)
-				{
-					const int segmentNumber = idx_tail - idx->idx_rpt;
+			// Collect nodes equivalent to the given sort node
 
-					if (segmentNumber >= equalSegments)
-						break;
-				}
+			HalfStaticArray<ValueExprNode*, OPT_STATIC_ITEMS> nodes;
+			nodes.add(orgNode);
 
-				if (idx_tail >= idx_end || fieldNode->fieldId != idx_tail->idx_field)
+			for (const OptimizerBlk::opt_conjunct* tail = optimizer->opt_conjuncts.begin();
+				 tail < optimizer->opt_conjuncts.end(); tail++)
+			{
+				BoolExprNode* const boolean = tail->opt_conjunct_node;
+				fb_assert(boolean);
+
+				ComparativeBoolNode* const cmpNode = nodeAs<ComparativeBoolNode>(boolean);
+
+				if (cmpNode && (cmpNode->blrOp == blr_eql || cmpNode->blrOp == blr_equiv))
 				{
-					usableIndex = false;
-					break;
+					ValueExprNode* const node1 = cmpNode->arg1;
+					ValueExprNode* const node2 = cmpNode->arg2;
+
+					if (node1->sameAs(csb, orgNode, false))
+						nodes.add(node2);
+
+					if (node2->sameAs(csb, orgNode, false))
+						nodes.add(node1);
 				}
 			}
 
-			if ((*descending && !(idx->idx_flags & idx_descending)) ||
-				(!*descending && (idx->idx_flags & idx_descending)) ||
-				((*nullOrder == rse_nulls_first && *descending) ||
-				 (*nullOrder == rse_nulls_last && !*descending)))
+			// Check whether any of the equivalent nodes is suitable for index navigation
+
+			for (ValueExprNode** iter = nodes.begin(); iter != nodes.end(); ++iter)
 			{
-				usableIndex = false;
-				break;
-			}
+				ValueExprNode* const node = *iter;
 
-			dsc desc;
-			node->getDesc(tdbb, csb, &desc);
-
-			// ASF: "desc.dsc_ttype() > ttype_last_internal" is to avoid recursion
-			// when looking for charsets/collations
-
-			if (DTYPE_IS_TEXT(desc.dsc_dtype) && desc.dsc_ttype() > ttype_last_internal)
-			{
-				const TextType* const tt = INTL_texttype_lookup(tdbb, desc.dsc_ttype());
-
-				if (idx->idx_flags & idx_unique)
+				if (idx->idx_flags & idx_expressn)
 				{
-					if (tt->getFlags() & TEXTTYPE_UNSORTED_UNIQUE)
-					{
-						usableIndex = false;
-						break;
-					}
+					if (!checkExpressionIndex(csb, idx, node, stream))
+						continue;
+				}
+				else if (!(fieldNode = nodeAs<FieldNode>(node)) || fieldNode->fieldStream != stream)
+				{
+					continue;
 				}
 				else
 				{
-					// ASF: We currently can't use non-unique index for GROUP BY and DISTINCT with
-					// multi-level and insensitive collation. In NAV, keys are verified with memcmp
-					// but there we don't know length of each level.
-					if (sort->unique && (tt->getFlags() & TEXTTYPE_SEPARATE_UNIQUE))
+					for (; idx_tail < idx_end && fieldNode->fieldId != idx_tail->idx_field; idx_tail++)
 					{
-						usableIndex = false;
-						break;
+						const int segmentNumber = idx_tail - idx->idx_rpt;
+
+						if (segmentNumber >= equalSegments)
+							break;
+					}
+
+					if (idx_tail >= idx_end || fieldNode->fieldId != idx_tail->idx_field)
+						continue;
+				}
+
+				if ((*direction == ORDER_DESC && !(idx->idx_flags & idx_descending)) ||
+					(*direction == ORDER_ASC && (idx->idx_flags & idx_descending)) ||
+					((*nullOrder == NULLS_FIRST && *direction == ORDER_DESC) ||
+					 (*nullOrder == NULLS_LAST && *direction == ORDER_ASC)))
+				{
+					continue;
+				}
+
+				dsc desc;
+				node->getDesc(tdbb, csb, &desc);
+
+				// ASF: "desc.dsc_ttype() > ttype_last_internal" is to avoid recursion
+				// when looking for charsets/collations
+
+				if (DTYPE_IS_TEXT(desc.dsc_dtype) && desc.dsc_ttype() > ttype_last_internal)
+				{
+					const TextType* const tt = INTL_texttype_lookup(tdbb, desc.dsc_ttype());
+
+					if (idx->idx_flags & idx_unique)
+					{
+						if (tt->getFlags() & TEXTTYPE_UNSORTED_UNIQUE)
+							continue;
+					}
+					else
+					{
+						// ASF: We currently can't use non-unique index for GROUP BY and DISTINCT with
+						// multi-level and insensitive collation. In NAV, keys are verified with memcmp
+						// but there we don't know length of each level.
+						if (sort->unique && (tt->getFlags() & TEXTTYPE_SEPARATE_UNIQUE))
+							continue;
 					}
 				}
+
+				nodeMatched = true;
+				break;
+			}
+
+			if (!nodeMatched)
+			{
+				usableIndex = false;
+				break;
 			}
 		}
 
@@ -1029,7 +1047,7 @@ ValueExprNode* OptimizerRetrieval::findDbKey(ValueExprNode* dbkey, SLONG* positi
  *
  **************************************/
 
-	const RecordKeyNode* keyNode = dbkey->as<RecordKeyNode>();
+	const RecordKeyNode* keyNode = nodeAs<RecordKeyNode>(dbkey);
 
 	if (keyNode && keyNode->blrOp == blr_dbkey)
 	{
@@ -1040,7 +1058,7 @@ ValueExprNode* OptimizerRetrieval::findDbKey(ValueExprNode* dbkey, SLONG* positi
 		return NULL;
 	}
 
-	ConcatenateNode* concatNode = dbkey->as<ConcatenateNode>();
+	ConcatenateNode* concatNode = nodeAs<ConcatenateNode>(dbkey);
 
 	if (concatNode)
 	{
@@ -1249,12 +1267,16 @@ InversionCandidate* OptimizerRetrieval::makeInversion(InversionCandidateList* in
 		inversion[i]->used = false;
 		const IndexScratch* const indexScratch = inversion[i]->scratch;
 
-		if (indexScratch && (indexScratch->idx->idx_runtime_flags & idx_plan_dont_use))
+		if (indexScratch &&
+			(indexScratch == navigationCandidate ||
+				(indexScratch->idx->idx_runtime_flags & idx_plan_dont_use)))
+		{
 			inversion[i]->used = true;
+		}
 	}
 
 	// The matches returned in this inversion are always sorted.
-	SortedArray<BoolExprNode*> matches;
+	SortedArray<BoolExprNode*> matches, navigationMatches;
 
 	if (navigationCandidate)
 	{
@@ -1269,9 +1291,21 @@ InversionCandidate* OptimizerRetrieval::makeInversion(InversionCandidateList* in
 
 			for (FB_SIZE_T j = 0; j < segment->matches.getCount(); j++)
 			{
-				if (!matches.exist(segment->matches[j]))
-					matches.add(segment->matches[j]);
+				if (!navigationMatches.exist(segment->matches[j]))
+					navigationMatches.add(segment->matches[j]);
 			}
+		}
+
+		matches.join(navigationMatches);
+
+		// If the navigational candidate includes any matching segments,
+		// reset the selectivity/cost prerequisites to account these matches
+		if (matchedSegments)
+		{
+			totalSelectivity = navigationCandidate->selectivity;
+			totalIndexCost = DEFAULT_INDEX_COST + totalSelectivity * navigationCandidate->cardinality;
+			previousTotalCost = totalIndexCost + totalSelectivity * streamCardinality;
+			firstCandidate = false;
 		}
 	}
 
@@ -1328,12 +1362,14 @@ InversionCandidate* OptimizerRetrieval::makeInversion(InversionCandidateList* in
 				}
 
 				// Look if a match is already used by previous matches.
-				bool anyMatchAlreadyUsed = false;
+				bool anyMatchAlreadyUsed = false, matchUsedByNavigation = false;
 				for (FB_SIZE_T k = 0; k < currentInv->matches.getCount(); k++)
 				{
 					if (matches.exist(currentInv->matches[k]))
 					{
 						anyMatchAlreadyUsed = true;
+						if (navigationMatches.exist(currentInv->matches[k]))
+							matchUsedByNavigation = true;
 						break;
 					}
 				}
@@ -1341,6 +1377,8 @@ InversionCandidate* OptimizerRetrieval::makeInversion(InversionCandidateList* in
 				if (anyMatchAlreadyUsed && !customPlan)
 				{
 					currentInv->used = true;
+					if (matchUsedByNavigation)
+						continue;
 					// If a match on this index was already used by another
 					// index, add also the other matches from this index.
 					for (FB_SIZE_T j = 0; j < currentInv->matches.getCount(); j++)
@@ -1632,10 +1670,10 @@ bool OptimizerRetrieval::matchBoolean(IndexScratch* indexScratch, BoolExprNode* 
 	if (boolean->nodFlags & ExprNode::FLAG_DEOPTIMIZE)
 		return false;
 
-	ComparativeBoolNode* cmpNode = boolean->as<ComparativeBoolNode>();
-	MissingBoolNode* missingNode = boolean->as<MissingBoolNode>();
-	NotBoolNode* notNode = boolean->as<NotBoolNode>();
-	RseBoolNode* rseNode = boolean->as<RseBoolNode>();
+	ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(boolean);
+	MissingBoolNode* missingNode = nodeAs<MissingBoolNode>(boolean);
+	NotBoolNode* notNode = nodeAs<NotBoolNode>(boolean);
+	RseBoolNode* rseNode = nodeAs<RseBoolNode>(boolean);
 	bool forward = true;
 	ValueExprNode* value = NULL;
 	ValueExprNode* match = NULL;
@@ -1664,11 +1702,11 @@ bool OptimizerRetrieval::matchBoolean(IndexScratch* indexScratch, BoolExprNode* 
 
 	    fb_assert(indexScratch->idx->idx_expression != NULL);
 
-		if (!checkExpressionIndex(indexScratch->idx, match, stream) ||
+		if (!checkExpressionIndex(csb, indexScratch->idx, match, stream) ||
 			(value && !value->computable(csb, stream, false)))
 		{
 			if ((!cmpNode || cmpNode->blrOp != blr_starting) && value &&
-				checkExpressionIndex(indexScratch->idx, value, stream) &&
+				checkExpressionIndex(csb, indexScratch->idx, value, stream) &&
 				match->computable(csb, stream, false))
 			{
 				ValueExprNode* temp = match;
@@ -1687,7 +1725,7 @@ bool OptimizerRetrieval::matchBoolean(IndexScratch* indexScratch, BoolExprNode* 
 
 		FieldNode* fieldNode;
 
-		if (!(fieldNode = match->as<FieldNode>()) ||
+		if (!(fieldNode = nodeAs<FieldNode>(match)) ||
 			fieldNode->fieldStream != stream ||
 			(value && !value->computable(csb, stream, false)))
 		{
@@ -1695,7 +1733,7 @@ bool OptimizerRetrieval::matchBoolean(IndexScratch* indexScratch, BoolExprNode* 
 			match = value;
 			value = temp;
 
-			if ((!match || !(fieldNode = match->as<FieldNode>())) ||
+			if ((!match || !(fieldNode = nodeAs<FieldNode>(match))) ||
 				fieldNode->fieldStream != stream ||
 				!value->computable(csb, stream, false))
 			{
@@ -1758,7 +1796,7 @@ bool OptimizerRetrieval::matchBoolean(IndexScratch* indexScratch, BoolExprNode* 
 
 	for (int i = 0; i < indexScratch->idx->idx_count; i++)
 	{
-		FieldNode* fieldNode = match->as<FieldNode>();
+		FieldNode* fieldNode = nodeAs<FieldNode>(match);
 
 		if (!(indexScratch->idx->idx_flags & idx_expressn))
 		{
@@ -1976,9 +2014,9 @@ InversionCandidate* OptimizerRetrieval::matchDbKey(BoolExprNode* boolean) const
  **************************************/
 	// If this isn't an equality, it isn't even interesting
 
-	ComparativeBoolNode* cmpNode = boolean->as<ComparativeBoolNode>();
+	ComparativeBoolNode* cmpNode = nodeAs<ComparativeBoolNode>(boolean);
 
-	if (!cmpNode || cmpNode->blrOp != blr_eql)
+	if (!cmpNode || (cmpNode->blrOp != blr_eql && cmpNode->blrOp != blr_equiv))
 		return NULL;
 
 	// Find the side of the equality that is potentially a dbkey.  If
@@ -1987,15 +2025,15 @@ InversionCandidate* OptimizerRetrieval::matchDbKey(BoolExprNode* boolean) const
 	ValueExprNode* dbkey = cmpNode->arg1;
 	ValueExprNode* value = cmpNode->arg2;
 
-	const RecordKeyNode* keyNode = dbkey->as<RecordKeyNode>();
+	const RecordKeyNode* keyNode = nodeAs<RecordKeyNode>(dbkey);
 
 	if (!(keyNode && keyNode->blrOp == blr_dbkey && keyNode->recStream == stream) &&
-		!dbkey->is<ConcatenateNode>())
+		!nodeIs<ConcatenateNode>(dbkey))
 	{
-		keyNode = value->as<RecordKeyNode>();
+		keyNode = nodeAs<RecordKeyNode>(value);
 
 		if (!(keyNode && keyNode->blrOp == blr_dbkey && keyNode->recStream == stream) &&
-			!value->is<ConcatenateNode>())
+			!nodeIs<ConcatenateNode>(value))
 		{
 			return NULL;
 		}
@@ -2012,7 +2050,7 @@ InversionCandidate* OptimizerRetrieval::matchDbKey(BoolExprNode* boolean) const
 	// If this is a concatenation, find an appropriate dbkey
 
 	SLONG n = 0;
-	if (dbkey->is<ConcatenateNode>())
+	if (nodeIs<ConcatenateNode>(dbkey))
 	{
 		dbkey = findDbKey(dbkey, &n);
 		if (!dbkey)
@@ -2021,7 +2059,7 @@ InversionCandidate* OptimizerRetrieval::matchDbKey(BoolExprNode* boolean) const
 
 	// Make sure we have the correct stream
 
-	keyNode = dbkey->as<RecordKeyNode>();
+	keyNode = nodeAs<RecordKeyNode>(dbkey);
 
 	if (!keyNode || keyNode->blrOp != blr_dbkey || keyNode->recStream != stream)
 		return NULL;
@@ -2063,13 +2101,12 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
  *  inversion candidate could be returned.
  *
  **************************************/
-	BinaryBoolNode* binaryNode = boolean->as<BinaryBoolNode>();
+	BinaryBoolNode* binaryNode = nodeAs<BinaryBoolNode>(boolean);
 
 	// Handle the "OR" case up front
 	if (binaryNode && binaryNode->blrOp == blr_or)
 	{
 		InversionCandidateList inversions;
-		inversions.shrink(0);
 
 		// Make list for index matches
 		IndexScratchList indexOrScratches;
@@ -2094,7 +2131,7 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		if (invCandidate1)
 			inversions.add(invCandidate1);
 
-		BinaryBoolNode* childBoolNode = binaryNode->arg1->as<BinaryBoolNode>();
+		BinaryBoolNode* childBoolNode = nodeAs<BinaryBoolNode>(binaryNode->arg1);
 
 		// Get usable inversions based on indexOrScratches and scope
 		if (!childBoolNode || childBoolNode->blrOp != blr_or)
@@ -2124,7 +2161,7 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		if (invCandidate2)
 			inversions.add(invCandidate2);
 
-		childBoolNode = binaryNode->arg2->as<BinaryBoolNode>();
+		childBoolNode = nodeAs<BinaryBoolNode>(binaryNode->arg2);
 
 		// Make inversion based on indexOrScratches and scope
 		if (!childBoolNode || childBoolNode->blrOp != blr_or)
@@ -2185,34 +2222,42 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		{
 			BoolExprNode* condition = binaryNode->arg2;
 
-			if (invCandidate1->condition)
+			if (condition->computable(csb, INVALID_STREAM, false) && !condition->findStream(csb, stream))
 			{
-				BinaryBoolNode* const newNode =
-					FB_NEW_POOL(*tdbb->getDefaultPool()) BinaryBoolNode(*tdbb->getDefaultPool(), blr_or);
-				newNode->arg1 = invCandidate1->condition;
-				newNode->arg2 = condition;
-				condition = newNode;
-			}
+				if (invCandidate1->condition)
+				{
+					BinaryBoolNode* const newNode =
+						FB_NEW_POOL(*tdbb->getDefaultPool())
+							BinaryBoolNode(*tdbb->getDefaultPool(), blr_or);
+					newNode->arg1 = invCandidate1->condition;
+					newNode->arg2 = condition;
+					condition = newNode;
+				}
 
-			invCandidate1->condition = condition;
-			return invCandidate1;
+				invCandidate1->condition = condition;
+				return invCandidate1;
+			}
 		}
 
 		if (invCandidate2)
 		{
 			BoolExprNode* condition = binaryNode->arg1;
 
-			if (invCandidate2->condition)
+			if (condition->computable(csb, INVALID_STREAM, false) && !condition->findStream(csb, stream))
 			{
-				BinaryBoolNode* const newNode =
-					FB_NEW_POOL(*tdbb->getDefaultPool()) BinaryBoolNode(*tdbb->getDefaultPool(), blr_or);
-				newNode->arg1 = invCandidate2->condition;
-				newNode->arg2 = condition;
-				condition = newNode;
-			}
+				if (invCandidate2->condition)
+				{
+					BinaryBoolNode* const newNode =
+						FB_NEW_POOL(*tdbb->getDefaultPool())
+							BinaryBoolNode(*tdbb->getDefaultPool(), blr_or);
+					newNode->arg1 = invCandidate2->condition;
+					newNode->arg2 = condition;
+					condition = newNode;
+				}
 
-			invCandidate2->condition = condition;
-			return invCandidate2;
+				invCandidate2->condition = condition;
+				return invCandidate2;
+			}
 		}
 
 		return NULL;
@@ -2224,7 +2269,6 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		// and finally get candidate inversions.
 		// Normally we come here from within a OR conjunction.
 		InversionCandidateList inversions;
-		inversions.shrink(0);
 
 		InversionCandidate* invCandidate = matchOnIndexes(
 			inputIndexScratches, binaryNode->arg1, scope);
@@ -2240,6 +2284,9 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		return makeInversion(&inversions);
 	}
 
+	// Check for DB_KEY comparison
+	InversionCandidate* const invCandidate = matchDbKey(boolean);
+
 	// Walk through indexes
 	for (FB_SIZE_T i = 0; i < inputIndexScratches->getCount(); i++)
 	{
@@ -2253,7 +2300,7 @@ InversionCandidate* OptimizerRetrieval::matchOnIndexes(
 		}
 	}
 
-	return NULL;
+	return invCandidate;
 }
 
 
@@ -2366,13 +2413,13 @@ bool OptimizerRetrieval::validateStarts(IndexScratch* indexScratch, ComparativeB
 		// we use starting with against it? Is that allowed?
 		fb_assert(indexScratch->idx->idx_expression != NULL);
 
-		if (!(checkExpressionIndex(indexScratch->idx, field, stream) ||
+		if (!(checkExpressionIndex(csb, indexScratch->idx, field, stream) ||
 			(value && !value->computable(csb, stream, false))))
 		{
 			// AB: Can we swap de left and right sides by a starting with?
 			// X STARTING WITH 'a' that is never the same as 'a' STARTING WITH X
 			if (value &&
-				checkExpressionIndex(indexScratch->idx, value, stream) &&
+				checkExpressionIndex(csb, indexScratch->idx, value, stream) &&
 				field->computable(csb, stream, false))
 			{
 				field = value;
@@ -2384,7 +2431,7 @@ bool OptimizerRetrieval::validateStarts(IndexScratch* indexScratch, ComparativeB
 	}
 	else
 	{
-		FieldNode* fieldNode = field->as<FieldNode>();
+		FieldNode* fieldNode = nodeAs<FieldNode>(field);
 
 		if (!fieldNode)
 		{
@@ -2394,7 +2441,7 @@ bool OptimizerRetrieval::validateStarts(IndexScratch* indexScratch, ComparativeB
 			// this must include many matches (think about empty string)
 			return false;
 			/*
-			if (!value->is<FieldNode>())
+			if (!nodeIs<FieldNode>(value))
 				return NULL;
 			field = value;
 			value = cmpNode->arg1;
@@ -2402,7 +2449,7 @@ bool OptimizerRetrieval::validateStarts(IndexScratch* indexScratch, ComparativeB
 		}
 
 		// Every string starts with an empty string so don't bother using an index in that case.
-		LiteralNode* literal = value->as<LiteralNode>();
+		LiteralNode* literal = nodeAs<LiteralNode>(value);
 
 		if (literal)
 		{

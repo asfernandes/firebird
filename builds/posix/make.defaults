@@ -48,7 +48,8 @@ LNG_ROOT=$(ROOT)/lang_helpers
 EXA_ROOT=$(ROOT)/examples
 
 IsCross=@IS_CROSS@
-TOMBUILD_FLG=@TOMBUILD@
+TOMMATH_BUILD_FLG=@TOMMATH_BUILD@
+TOMCRYPT_BUILD_FLG=@TOMCRYPT_BUILD@
 
 FB_BUILD=$(GEN_ROOT)/$(TARGET)/firebird
 ifeq ($(IsCross), Y)
@@ -132,6 +133,10 @@ CAS_OPTIONS=@CAS_OPTIONS@
 
 # multiple-precision integer library
 MATHLIB=@MATHLIB@
+DECLIB=-ldecFloat$(CROSS)
+
+# crypt library
+CRYPTLIB=@CRYPTLIB@
 
 LSB_FLG=@LSB_FLG@
 ifeq ($(LSB_FLG), Y)
@@ -177,9 +182,8 @@ STATICLIB_LINK = $(AR) crus
 EXE_LINK = $(CXX) $(GLOB_OPTIONS) $(CXXFLAGS)
 STATICEXE_LINK = $(CXX) $(GLOB_OPTIONS) $(CXXFLAGS)
 
-LINK_LIBS = @LIBS@
-STATICLINK_LIBS = @LIBS@
-SO_LINK_LIBS = @LIBS@
+LINK_LIBS = @LIBS@ $(DECLIB)
+SO_LINK_LIBS = @LIBS@ $(DECLIB)
 
 # Default extensions
 
@@ -194,14 +198,6 @@ SHRLIB_FOREIGN_EXT=	$(SHRLIB_EXT)
 # Include file with version variable definitions
 
 include $(ROOT)/gen/Make.Version
-#MajorVer = 2
-#MinorVer = 5
-#RevNo = 0
-#BuildNum = 28678
-#BuildType = T
-#BuildSuffix = Firebird 3.0 Unstable
-#PackageVersion = Unstable
-#FirebirdVersion = 2.5.0
 
 # Add windows dll to library patterns
 
@@ -219,7 +215,7 @@ vpath %.dll $(LIB)
 # From jrd
 
 
-# The firebird shared library name 
+# The firebird shared library name
 # SD: This name is also hard-coded in builds/install/.../linux/classic scripts.
 #     Scold me, but I don't want library names to be in configure.in
 #
@@ -264,6 +260,12 @@ TOMMATH_INC=$(TOMMATH)
 TOMMATH_SO=$(TOMMATH)/.libs/libtommath.so
 TOMMATH_VER=0
 
+# Own tomcrypt support
+TOMCRYPT=$(ROOT)/extern/libtomcrypt
+TOMCRYPT_INC=$(TOMCRYPT)/src/headers
+TOMCRYPT_SO=$(TOMCRYPT)/.libs/libtomcrypt.so
+TOMCRYPT_VER=0
+
 # LINKER OPTIONS
 #
 
@@ -289,6 +291,7 @@ LINK_UDR_PLUGIN_SYMBOLS = $(call LIB_LINK_MAPFILE,$(UDR_PLUGIN_VERS))
 LINK_EMPTY_SYMBOLS = $(call LIB_LINK_MAPFILE,$(EMPTY_VERS))
 LINK_PLUGIN_SYMBOLS = $(call LIB_LINK_MAPFILE,$(PLUGIN_VERS))
 LINK_EXEC_EXPORT=-rdynamic
+UDR_SUPPORT_LIBS=
 
 LIB_PLATFORM_RPATH = -Wl,-rpath,$(1)
 
@@ -304,7 +307,7 @@ endif
 LIB_PATH_OPTS = $(call LIB_LINK_RPATH,lib) $(call LIB_LINK_RPATH,intl)
 LIB_LINK_SONAME= -Wl,-soname,$(1)
 LIB_LINK_MAPFILE= -Wl,--version-script,$(1)
-FIREBIRD_LIBRARY_LINK= -L$(LIB) -lfbclient $(MATHLIB)
+FIREBIRD_LIBRARY_LINK= -L$(LIB) -lfbclient $(MATHLIB) $(CRYPTLIB)
 
 EXE_LINK_OPTIONS= $(LDFLAGS) $(THR_FLAGS) $(UNDEF_FLAGS) $(LIB_PATH_OPTS) $(LINK_EMPTY_SYMBOLS)
 LIB_LINK_OPTIONS= $(LDFLAGS) $(THR_FLAGS) -shared
@@ -321,7 +324,7 @@ LINK_IB_UTIL = $(LIB_LINK) $(LINK_IBUTIL_SYMBOLS) $(LIB_LINK_OPTIONS) $(UNDEF_FL
 LINK_IB_UTIL_LIBS = $(THR_LIBS)
 
 LINK_INTL = $(LIB_LINK) $(LINK_FBINTL_SYMBOLS) $(LIB_LINK_OPTIONS) $(UNDEF_FLAGS)\
- $(call LIB_LINK_SONAME,libintl.$(SHRLIB_EXT).1) $(call LIB_LINK_RPATH,lib)
+ $(call LIB_LINK_SONAME,libfbintl.$(SHRLIB_EXT).1) $(call LIB_LINK_RPATH,lib)
 LINK_INTL_LIBS = -L$(LIB) $(SO_LINK_LIBS) $(FIREBIRD_LIBRARY_LINK)
 
 LINK_TRACE = $(LIB_LINK) $(LINK_PLUGIN_SYMBOLS) $(LIB_LINK_OPTIONS) $(UNDEF_FLAGS)\
@@ -330,7 +333,7 @@ LINK_TRACE_LIBS = -L$(LIB) $(SO_LINK_LIBS)
 
 LINK_FIREBIRD = $(LIB_LINK) $(LINK_FIREBIRD_SYMBOLS) $(LIB_LINK_OPTIONS) $(LIB_FIREBIRD_OPTIONS) $(UNDEF_FLAGS)\
  $(call LIB_LINK_SONAME,$(LibrarySoName)) $(call LIB_LINK_RPATH,lib)
-LINK_FIREBIRD_LIBS = -L$(LIB) $(LIB_GUI) $(SO_LINK_LIBS) $(MATHLIB)
+LINK_FIREBIRD_LIBS = -L$(LIB) $(LIB_GUI) $(SO_LINK_LIBS) $(MATHLIB) $(CRYPTLIB)
 
 LINK_ENGINE = $(LIB_LINK) $(LINK_PLUGIN_SYMBOLS) $(LIB_LINK_OPTIONS) $(LIB_FIREBIRD_OPTIONS) $(UNDEF_FLAGS)\
  $(call LIB_LINK_SONAME,$(EngineSoName)) $(call LIB_LINK_RPATH,lib)

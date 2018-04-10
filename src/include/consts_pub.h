@@ -148,6 +148,7 @@
  <address-element> ::=
 	isc_dpb_addr_protocol <byte-clumplet-length> <protocol-string> |
 	isc_dpb_addr_endpoint <byte-clumplet-length> <remote-endpoint-string>
+	isc_dpb_addr_flags <byte-clumplet-length> <flags-int>
 
  <protocol-string> ::=
 	"TCPv4" |
@@ -161,12 +162,20 @@
 	<IPv6-address> | // such as "2001:0:13FF:09FF::1"
 	<xnet-process-id> | // such as "17864"
 	...
+
+ <flags-int> ::=
+ 	bitmask of possible flags
 */
 
 #define isc_dpb_address 1
 
 #define isc_dpb_addr_protocol 1
 #define isc_dpb_addr_endpoint 2
+#define isc_dpb_addr_flags 3
+
+/* possible addr flags */
+#define isc_dpb_addr_flag_conn_compressed	0x01
+#define isc_dpb_addr_flag_conn_encrypted	0x02
 
 /*********************************/
 /* isc_dpb_verify specific flags */
@@ -338,7 +347,7 @@
 #define isc_info_svc_capabilities		57	/* Retrieves a bitmask representing the server's capabilities */
 #define isc_info_svc_user_dbpath		58	/* Retrieves the path to the security database in use by the server */
 #define isc_info_svc_get_env			59	/* Retrieves the setting of $FIREBIRD */
-#define isc_info_svc_get_env_lock		60	/* Retrieves the setting of $FIREBIRD_LCK */
+#define isc_info_svc_get_env_lock		60	/* Retrieves the setting of $FIREBIRD_LOCK */
 #define isc_info_svc_get_env_msg		61	/* Retrieves the setting of $FIREBIRD_MSG */
 #define isc_info_svc_line				62	/* Retrieves 1 line of service output per call */
 #define isc_info_svc_to_eof				63	/* Retrieves as much of the server output as will fit in the supplied buffer */
@@ -649,6 +658,13 @@
 //#define isc_blob_graphic                  22
 //#define isc_blob_dbase_ole                23
 //#define isc_blob_typed_binary             24
+
+/*****************/
+/* Text Subtypes */
+/*****************/
+
+#define fb_text_subtype_text	0
+#define fb_text_subtype_binary	1
 
 /* Deprecated definitions maintained for compatibility only */
 

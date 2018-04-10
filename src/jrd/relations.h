@@ -39,6 +39,7 @@ RELATION(nam_database, rel_database, ODS_8_0, rel_persistent)
 	FIELD(f_dat_class, nam_class, fld_class, 1, ODS_8_0)
 	FIELD(f_dat_charset, nam_charset_name, fld_charset_name, 1, ODS_8_0)
 	FIELD(f_dat_linger, nam_linger, fld_linger, 1, ODS_12_0)
+	FIELD(f_dat_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 2 (RDB$FIELDS)
@@ -144,6 +145,7 @@ RELATION(nam_relations, rel_relations, ODS_8_0, rel_persistent)
 	FIELD(f_rel_def_class, nam_def_class, fld_class, 1, ODS_8_0)
 	FIELD(f_rel_flags, nam_flags, fld_flag_nullable, 0, ODS_8_0)
 	FIELD(f_rel_type, nam_r_type, fld_r_type, 0, ODS_11_1)
+	FIELD(f_rel_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 7 (RDB$VIEW_RELATIONS)
@@ -205,6 +207,7 @@ RELATION(nam_trgs, rel_triggers, ODS_8_0, rel_persistent)
 	FIELD(f_trg_debug_info, nam_debug_info, fld_debug_info, 1, ODS_11_1)
 	FIELD(f_trg_engine_name, nam_engine_name, fld_engine_name, 1, ODS_12_0)
 	FIELD(f_trg_entry, nam_entry, fld_ext_name, 1, ODS_12_0)
+	FIELD(f_trg_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 13 (RDB$DEPENDENCIES)
@@ -239,6 +242,7 @@ RELATION(nam_funs, rel_funs, ODS_8_0, rel_persistent)
 	FIELD(f_fun_owner, nam_owner, fld_user, 1, ODS_12_0)
 	FIELD(f_fun_legacy_flag, nam_legacy_flag, fld_flag_nullable, 0, ODS_12_0)
 	FIELD(f_fun_deterministic_flag, nam_deterministic_flag, fld_flag_nullable, 0, ODS_12_0)
+	FIELD(f_fun_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 15 (RDB$FUNCTION_ARGUMENTS)
@@ -382,6 +386,7 @@ RELATION(nam_procedures, rel_procedures, ODS_8_0, rel_persistent)
 	FIELD(f_prc_entry, nam_entry, fld_ext_name, 1, ODS_12_0)
 	FIELD(f_prc_pkg_name, nam_pkg_name, fld_pkg_name, 1, ODS_12_0)
 	FIELD(f_prc_private_flag, nam_private_flag, fld_flag_nullable, 1, ODS_12_0)
+	FIELD(f_prc_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 27 (RDB$PROCEDURE_PARAMETERS)
@@ -512,6 +517,11 @@ RELATION(nam_mon_attachments, rel_mon_attachments, ODS_11_1, rel_virtual)
 	FIELD(f_mon_att_remote_os_user, nam_mon_remote_os_user, fld_os_user, 0, ODS_12_0)
 	FIELD(f_mon_att_auth_method, nam_mon_auth_method, fld_auth_method, 0, ODS_12_0)
 	FIELD(f_mon_att_sys_flag, nam_mon_sys_flag, fld_flag, 0, ODS_12_0)
+	FIELD(f_mon_att_idle_timeout, nam_idle_timeout, fld_idle_timeout, 0, ODS_13_0)
+	FIELD(f_mon_att_idle_timer, nam_idle_timer, fld_idle_timer, 0, ODS_13_0)
+	FIELD(f_mon_att_stmt_timeout, nam_stmt_timeout, fld_stmt_timeout, 0, ODS_13_0)
+	FIELD(f_mon_att_conn_compressed, nam_conn_compressed, fld_bool, 0, ODS_13_0)
+	FIELD(f_mon_att_conn_encrypted, nam_conn_encrypted, fld_bool, 0, ODS_13_0)
 END_RELATION
 
 // Relation 35 (MON$TRANSACTIONS)
@@ -541,6 +551,8 @@ RELATION(nam_mon_statements, rel_mon_statements, ODS_11_1, rel_virtual)
 	FIELD(f_mon_stmt_sql_text, nam_mon_sql_text, fld_source, 0, ODS_11_1)
 	FIELD(f_mon_stmt_stat_id, nam_mon_stat_id, fld_stat_id, 0, ODS_11_1)
 	FIELD(f_mon_stmt_expl_plan, nam_mon_expl_plan, fld_source, 0, ODS_11_1)
+	FIELD(f_mon_stmt_timeout, nam_stmt_timeout, fld_stmt_timeout, 0, ODS_13_0)
+	FIELD(f_mon_stmt_timer, nam_stmt_timer, fld_stmt_timer, 0, ODS_13_0)
 END_RELATION
 
 // Relation 37 (MON$CALL_STACK)
@@ -615,6 +627,7 @@ RELATION(nam_packages, rel_packages, ODS_12_0, rel_persistent)
 	FIELD(f_pkg_owner, nam_owner, fld_user, 1, ODS_12_0)
 	FIELD(f_pkg_sys_flag, nam_sys_flag, fld_flag, 1, ODS_12_0)
 	FIELD(f_pkg_desc, nam_description, fld_description, 1, ODS_12_0)
+	FIELD(f_pkg_sql_security, nam_sql_security, fld_b_sql_security, 1, ODS_13_0)
 END_RELATION
 
 // Relation 43 (SEC$USERS)

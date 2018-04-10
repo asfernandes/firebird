@@ -108,7 +108,7 @@ void GEN_hidden_variables(DsqlCompilerScratch* dsqlScratch)
  **/
 void GEN_expr(DsqlCompilerScratch* dsqlScratch, ExprNode* node)
 {
-	RseNode* rseNode = node->as<RseNode>();
+	RseNode* rseNode = nodeAs<RseNode>(node);
 	if (rseNode)
 	{
 		GEN_rse(dsqlScratch, rseNode);
@@ -124,8 +124,10 @@ void GEN_expr(DsqlCompilerScratch* dsqlScratch, ExprNode* node)
 
 	// ASF: Shouldn't we check nod_gen_id2 too?
 
-	if (node->kind == DmlNode::KIND_VALUE && node->dsqlCompatDialectVerb &&
-		dsqlScratch->clientDialect == SQL_DIALECT_V6_TRANSITION)
+	const char* compatDialectVerb;
+
+	if (node->getKind() == DmlNode::KIND_VALUE && dsqlScratch->clientDialect == SQL_DIALECT_V6_TRANSITION &&
+		(compatDialectVerb = node->getCompatDialectVerb()))
 	{
 		dsc desc;
 		MAKE_desc(dsqlScratch, &desc, static_cast<ValueExprNode*>(node));
@@ -134,7 +136,7 @@ void GEN_expr(DsqlCompilerScratch* dsqlScratch, ExprNode* node)
 		{
 			ERRD_post_warning(
 				Arg::Warning(isc_dsql_dialect_warning_expr) <<
-				Arg::Str(node->dsqlCompatDialectVerb));
+				Arg::Str(compatDialectVerb));
 		}
 	}
 }
@@ -200,6 +202,25 @@ void GEN_port(DsqlCompilerScratch* dsqlScratch, dsql_msg* message)
 		{
 			if (fromCharSet != toCharSet)
 				parameter->par_desc.setTextType(toCharSet);
+		}
+		else if (parameter->par_desc.isDecFloat())
+		{
+			const DecimalBinding& b = tdbb->getAttachment()->att_dec_binding;
+			switch (b.bind)
+			{
+			case DecimalBinding::DEC_NATIVE:
+				break;
+			case DecimalBinding::DEC_TEXT:
+				parameter->par_desc.makeText((parameter->par_desc.dsc_dtype == dtype_dec64 ?
+					IDecFloat16::STRING_SIZE : IDecFloat34::STRING_SIZE) - 1, ttype_ascii);
+				break;
+			case DecimalBinding::DEC_DOUBLE:
+				parameter->par_desc.makeDouble();
+				break;
+			case DecimalBinding::DEC_NUMERIC:
+				parameter->par_desc.makeInt64(b.numScale);
+				break;
+			}
 		}
 
 		if (parameter->par_desc.dsc_dtype == dtype_text && parameter->par_index != 0)
@@ -273,7 +294,7 @@ void GEN_request(DsqlCompilerScratch* scratch, DmlNode* node)
 				else
 				{
 					GEN_port(scratch, message);
-					scratch->appendUChar(blr_receive);
+					scratch->appendUChar(blr_receive_batch);
 					scratch->appendUChar(message->msg_number);
 				}
 				message = statement->getReceiveMsg();
@@ -364,6 +385,19 @@ void GEN_descriptor( DsqlCompilerScratch* dsqlScratch, const dsc* desc, bool tex
 
 	case dtype_double:
 		dsqlScratch->appendUChar(blr_double);
+		break;
+
+	case dtype_dec64:
+		dsqlScratch->appendUChar(blr_dec64);
+		break;
+
+	case dtype_dec128:
+		dsqlScratch->appendUChar(blr_dec128);
+		break;
+
+	case dtype_dec_fixed:
+		dsqlScratch->appendUChar(blr_dec_fixed);
+		dsqlScratch->appendUChar(desc->dsc_scale);
 		break;
 
 	case dtype_sql_date:
@@ -561,7 +595,7 @@ void GEN_rse(DsqlCompilerScratch* dsqlScratch, RseNode* rse)
 	}
 
 	if (rse->dsqlOrder)
-		GEN_sort(dsqlScratch, rse->dsqlOrder);
+		GEN_sort(dsqlScratch, blr_sort, rse->dsqlOrder);
 
 	if (rse->dsqlDistinct)
 	{
@@ -587,28 +621,32 @@ void GEN_rse(DsqlCompilerScratch* dsqlScratch, RseNode* rse)
 
 
 // Generate a sort clause.
-void GEN_sort(DsqlCompilerScratch* dsqlScratch, ValueListNode* list)
+void GEN_sort(DsqlCompilerScratch* dsqlScratch, UCHAR blrVerb, ValueListNode* list)
 {
-	dsqlScratch->appendUChar(blr_sort);
-	dsqlScratch->appendUChar(list->items.getCount());
+	dsqlScratch->appendUChar(blrVerb);
+	dsqlScratch->appendUChar(list ? list->items.getCount() : 0);
 
-	NestConst<ValueExprNode>* ptr = list->items.begin();
-	for (const NestConst<ValueExprNode>* const end = list->items.end(); ptr != end; ++ptr)
+	if (list)
 	{
-		OrderNode* orderNode = (*ptr)->as<OrderNode>();
+		NestConst<ValueExprNode>* ptr = list->items.begin();
 
-		switch (orderNode->nullsPlacement)
+		for (const NestConst<ValueExprNode>* const end = list->items.end(); ptr != end; ++ptr)
 		{
-			case OrderNode::NULLS_FIRST:
-				dsqlScratch->appendUChar(blr_nullsfirst);
-				break;
-			case OrderNode::NULLS_LAST:
-				dsqlScratch->appendUChar(blr_nullslast);
-				break;
-		}
+			OrderNode* orderNode = nodeAs<OrderNode>(*ptr);
 
-		dsqlScratch->appendUChar((orderNode->descending ? blr_descending : blr_ascending));
-		GEN_expr(dsqlScratch, orderNode->value);
+			switch (orderNode->nullsPlacement)
+			{
+				case OrderNode::NULLS_FIRST:
+					dsqlScratch->appendUChar(blr_nullsfirst);
+					break;
+				case OrderNode::NULLS_LAST:
+					dsqlScratch->appendUChar(blr_nullslast);
+					break;
+			}
+
+			dsqlScratch->appendUChar((orderNode->descending ? blr_descending : blr_ascending));
+			GEN_expr(dsqlScratch, orderNode->value);
+		}
 	}
 }
 

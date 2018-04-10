@@ -58,47 +58,8 @@ static const int TEMP_LENGTH = 128;
 //--------------------
 
 
-namespace
-{
-	// Copy sub expressions (including subqueries).
-	class SubExprNodeCopier : public NodeCopier
-	{
-	public:
-		explicit SubExprNodeCopier(thread_db* tdbb, CompilerScratch* aCsb)
-			//: NodeCopier(aCsb, localMap)
-			: NodeCopier(aCsb, FB_NEW_POOL(*tdbb->getDefaultPool()) StreamType[STREAM_MAP_LENGTH])
-		{
-			// Initialize the map so all streams initially resolve to the original number. As soon as
-			// copy creates new streams, the map are being overwritten.
-			// CVC: better in the heap, because we need larger map.
-			localMap = remap;
-			for (unsigned i = 0; i < STREAM_MAP_LENGTH; ++i)
-				localMap[i] = i;
-		}
-
-		~SubExprNodeCopier()
-		{
-			delete[] localMap;
-		}
-
-	private:
-		//StreamType localMap[JrdStatement::MAP_LENGTH];
-		StreamType* localMap;
-	};
-}	// namespace
-
-
 //--------------------
 
-
-bool BoolExprNode::computable(CompilerScratch* csb, StreamType stream,
-	bool allowOnlyCurrentStream, ValueExprNode* /*value*/)
-{
-	if (nodFlags & (FLAG_DEOPTIMIZE | FLAG_RESIDUAL))
-		return false;
-
-	return ExprNode::computable(csb, stream, allowOnlyCurrentStream);
-}
 
 BoolExprNode* BoolExprNode::pass2(thread_db* tdbb, CompilerScratch* csb)
 {
@@ -112,7 +73,7 @@ BoolExprNode* BoolExprNode::pass2(thread_db* tdbb, CompilerScratch* csb)
 
 		if (csb->csb_current_nodes.hasData())
 		{
-			RseNode* topRseNode = csb->csb_current_nodes[0]->as<RseNode>();
+			RseNode* topRseNode = nodeAs<RseNode>(csb->csb_current_nodes[0]);
 			fb_assert(topRseNode);
 
 			if (!topRseNode->rse_invariants)
@@ -142,8 +103,6 @@ BinaryBoolNode::BinaryBoolNode(MemoryPool& pool, UCHAR aBlrOp, BoolExprNode* aAr
 	  arg1(aArg1),
 	  arg2(aArg2)
 {
-	addChildNode(arg1, arg1);
-	addChildNode(arg2, arg2);
 }
 
 DmlNode* BinaryBoolNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* csb, const UCHAR blrOp)
@@ -167,7 +126,7 @@ string BinaryBoolNode::internalPrint(NodePrinter& printer) const
 
 BoolExprNode* BinaryBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 {
-	return FB_NEW_POOL(getPool()) BinaryBoolNode(getPool(), blrOp,
+	return FB_NEW_POOL(dsqlScratch->getPool()) BinaryBoolNode(dsqlScratch->getPool(), blrOp,
 		doDsqlPass(dsqlScratch, arg1), doDsqlPass(dsqlScratch, arg2));
 }
 
@@ -178,33 +137,33 @@ void BinaryBoolNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 	GEN_expr(dsqlScratch, arg2);
 }
 
-bool BinaryBoolNode::dsqlMatch(const ExprNode* other, bool ignoreMapCast) const
+bool BinaryBoolNode::dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const
 {
-	if (!BoolExprNode::dsqlMatch(other, ignoreMapCast))
+	if (!BoolExprNode::dsqlMatch(dsqlScratch, other, ignoreMapCast))
 		return false;
 
-	const BinaryBoolNode* o = other->as<BinaryBoolNode>();
+	const BinaryBoolNode* o = nodeAs<BinaryBoolNode>(other);
 	fb_assert(o);
 
 	return blrOp == o->blrOp;
 }
 
-bool BinaryBoolNode::sameAs(const ExprNode* other, bool ignoreStreams) const
+bool BinaryBoolNode::sameAs(CompilerScratch* csb, const ExprNode* other, bool ignoreStreams) const
 {
-	const BinaryBoolNode* const otherNode = other->as<BinaryBoolNode>();
+	const BinaryBoolNode* const otherNode = nodeAs<BinaryBoolNode>(other);
 
 	if (!otherNode || blrOp != otherNode->blrOp)
 		return false;
 
-	if (arg1->sameAs(otherNode->arg1, ignoreStreams) &&
-		arg2->sameAs(otherNode->arg2, ignoreStreams))
+	if (arg1->sameAs(csb, otherNode->arg1, ignoreStreams) &&
+		arg2->sameAs(csb, otherNode->arg2, ignoreStreams))
 	{
 		return true;
 	}
 
 	// A AND B is equivalent to B AND A, ditto for A OR B and B OR A.
-	return arg1->sameAs(otherNode->arg2, ignoreStreams) &&
-		arg2->sameAs(otherNode->arg1, ignoreStreams);
+	return arg1->sameAs(csb, otherNode->arg2, ignoreStreams) &&
+		arg2->sameAs(csb, otherNode->arg1, ignoreStreams);
 }
 
 BoolExprNode* BinaryBoolNode::copy(thread_db* tdbb, NodeCopier& copier) const
@@ -355,9 +314,6 @@ ComparativeBoolNode::ComparativeBoolNode(MemoryPool& pool, UCHAR aBlrOp,
 	  arg3(aArg3),
 	  dsqlSpecialArg(NULL)
 {
-	addChildNode(arg1, arg1);
-	addChildNode(arg2, arg2);
-	addChildNode(arg3, arg3);
 }
 
 DmlNode* ComparativeBoolNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* csb, const UCHAR blrOp)
@@ -405,7 +361,7 @@ BoolExprNode* ComparativeBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 
 	if (dsqlSpecialArg)
 	{
-		ValueListNode* listNode = dsqlSpecialArg->as<ValueListNode>();
+		ValueListNode* listNode = nodeAs<ValueListNode>(dsqlSpecialArg);
 		if (listNode)
 		{
 			int listItemCount = 0;
@@ -423,15 +379,15 @@ BoolExprNode* ComparativeBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 							  Arg::Gds(isc_dsql_too_many_values) << Arg::Num(MAX_MEMBER_LIST));
 				}
 
-				ComparativeBoolNode* temp = FB_NEW_POOL(getPool()) ComparativeBoolNode(getPool(),
-					blrOp, procArg1, *ptr);
+				ComparativeBoolNode* temp = FB_NEW_POOL(dsqlScratch->getPool()) ComparativeBoolNode(
+					dsqlScratch->getPool(), blrOp, procArg1, *ptr);
 				resultNode = PASS1_compose(resultNode, temp, blr_or);
 			}
 
 			return resultNode->dsqlPass(dsqlScratch);
 		}
 
-		SelectExprNode* selNode = dsqlSpecialArg->as<SelectExprNode>();
+		SelectExprNode* selNode = nodeAs<SelectExprNode>(dsqlSpecialArg);
 		if (selNode)
 		{
 			fb_assert(!(selNode->dsqlFlags & RecordSourceNode::DFLAG_SINGLETON));
@@ -450,7 +406,7 @@ BoolExprNode* ComparativeBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 
 	procArg2 = doDsqlPass(dsqlScratch, procArg2);
 
-	ComparativeBoolNode* node = FB_NEW_POOL(getPool()) ComparativeBoolNode(getPool(), blrOp,
+	ComparativeBoolNode* node = FB_NEW_POOL(dsqlScratch->getPool()) ComparativeBoolNode(dsqlScratch->getPool(), blrOp,
 		doDsqlPass(dsqlScratch, procArg1),
 		procArg2,
 		doDsqlPass(dsqlScratch, procArg3));
@@ -460,7 +416,7 @@ BoolExprNode* ComparativeBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 		dsc desc;
 		MAKE_desc(dsqlScratch, &desc, node->arg1);
 
-		if (desc.dsc_dtype != dtype_boolean && !desc.isNull())
+		if (desc.dsc_dtype != dtype_boolean && desc.dsc_dtype != dtype_unknown && !desc.isNull())
 		{
 			ERRD_post(Arg::Gds(isc_sqlerr) << Arg::Num(-104) <<
 				Arg::Gds(isc_invalid_boolean_usage));
@@ -529,31 +485,31 @@ void ComparativeBoolNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 		GEN_expr(dsqlScratch, arg3);
 }
 
-bool ComparativeBoolNode::dsqlMatch(const ExprNode* other, bool ignoreMapCast) const
+bool ComparativeBoolNode::dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const
 {
-	if (!BoolExprNode::dsqlMatch(other, ignoreMapCast))
+	if (!BoolExprNode::dsqlMatch(dsqlScratch, other, ignoreMapCast))
 		return false;
 
-	const ComparativeBoolNode* o = other->as<ComparativeBoolNode>();
+	const ComparativeBoolNode* o = nodeAs<ComparativeBoolNode>(other);
 	fb_assert(o);
 
 	return dsqlFlag == o->dsqlFlag && blrOp == o->blrOp;
 }
 
-bool ComparativeBoolNode::sameAs(const ExprNode* other, bool ignoreStreams) const
+bool ComparativeBoolNode::sameAs(CompilerScratch* csb, const ExprNode* other, bool ignoreStreams) const
 {
-	const ComparativeBoolNode* const otherNode = other->as<ComparativeBoolNode>();
+	const ComparativeBoolNode* const otherNode = nodeAs<ComparativeBoolNode>(other);
 
 	if (!otherNode || blrOp != otherNode->blrOp)
 		return false;
 
-	bool matching = arg1->sameAs(otherNode->arg1, ignoreStreams) &&
-		arg2->sameAs(otherNode->arg2, ignoreStreams);
+	bool matching = arg1->sameAs(csb, otherNode->arg1, ignoreStreams) &&
+		arg2->sameAs(csb, otherNode->arg2, ignoreStreams);
 
 	if (matching)
 	{
 		matching = (!arg3 == !otherNode->arg3) &&
-			(!arg3 || arg3->sameAs(otherNode->arg3, ignoreStreams));
+			(!arg3 || arg3->sameAs(csb, otherNode->arg3, ignoreStreams));
 
 		if (matching)
 			return true;
@@ -564,8 +520,8 @@ bool ComparativeBoolNode::sameAs(const ExprNode* other, bool ignoreStreams) cons
 	if (blrOp == blr_eql || blrOp == blr_equiv || blrOp == blr_neq)
 	{
 		// A = B is equivalent to B = A, etc.
-		if (arg1->sameAs(otherNode->arg2, ignoreStreams) &&
-			arg2->sameAs(otherNode->arg1, ignoreStreams))
+		if (arg1->sameAs(csb, otherNode->arg2, ignoreStreams) &&
+			arg2->sameAs(csb, otherNode->arg1, ignoreStreams))
 		{
 			return true;
 		}
@@ -621,7 +577,7 @@ BoolExprNode* ComparativeBoolNode::pass1(thread_db* tdbb, CompilerScratch* csb)
 		// If there is no top-level RSE present and patterns are not constant, unmark node as invariant
 		// because it may be dependent on data or variables.
 		if ((nodFlags & FLAG_INVARIANT) &&
-			(!arg2->is<LiteralNode>() || (arg3 && !arg3->is<LiteralNode>())))
+			(!nodeIs<LiteralNode>(arg2) || (arg3 && !nodeIs<LiteralNode>(arg3))))
 		{
 			ExprNode* const* ctx_node;
 			ExprNode* const* end;
@@ -629,7 +585,7 @@ BoolExprNode* ComparativeBoolNode::pass1(thread_db* tdbb, CompilerScratch* csb)
 			for (ctx_node = csb->csb_current_nodes.begin(), end = csb->csb_current_nodes.end();
 				 ctx_node != end; ++ctx_node)
 			{
-				if ((*ctx_node)->as<RseNode>())
+				if (nodeAs<RseNode>(*ctx_node))
 					break;
 			}
 
@@ -653,7 +609,7 @@ void ComparativeBoolNode::pass2Boolean2(thread_db* tdbb, CompilerScratch* csb)
 
 	if (arg3)
 	{
-		if ((keyNode = arg3->as<RecordKeyNode>()) && keyNode->aggregate)
+		if ((keyNode = nodeAs<RecordKeyNode>(arg3)) && keyNode->aggregate)
 			ERR_post(Arg::Gds(isc_bad_dbkey));
 
 		dsc descriptor_c;
@@ -666,8 +622,8 @@ void ComparativeBoolNode::pass2Boolean2(thread_db* tdbb, CompilerScratch* csb)
 		}
 	}
 
-	if (((keyNode = arg1->as<RecordKeyNode>()) && keyNode->aggregate) ||
-		((keyNode = arg2->as<RecordKeyNode>()) && keyNode->aggregate))
+	if (((keyNode = nodeAs<RecordKeyNode>(arg1)) && keyNode->aggregate) ||
+		((keyNode = nodeAs<RecordKeyNode>(arg2)) && keyNode->aggregate))
 	{
 		ERR_post(Arg::Gds(isc_bad_dbkey));
 	}
@@ -807,13 +763,13 @@ bool ComparativeBoolNode::execute(thread_db* tdbb, jrd_req* request) const
 		case blr_leq:
 		case blr_neq:
 		case blr_between:
-			comparison = MOV_compare(desc[0], desc[1]);
+			comparison = MOV_compare(tdbb, desc[0], desc[1]);
 	}
 
 	// If we are checking equality of record_version
 	// and same transaction updated the record, force equality.
 
-	const RecordKeyNode* recVersionNode = arg1->as<RecordKeyNode>();
+	const RecordKeyNode* recVersionNode = nodeAs<RecordKeyNode>(arg1);
 
 	if (recVersionNode && recVersionNode->blrOp == blr_record_version && force_equal)
 		comparison = 0;
@@ -845,7 +801,7 @@ bool ComparativeBoolNode::execute(thread_db* tdbb, jrd_req* request) const
 			desc[1] = EVL_expr(tdbb, request, arg3);
 			if (request->req_flags & req_null)
 				return false;
-			return comparison >= 0 && MOV_compare(desc[0], desc[1]) <= 0;
+			return comparison >= 0 && MOV_compare(tdbb, desc[0], desc[1]) <= 0;
 
 		case blr_containing:
 		case blr_starting:
@@ -888,7 +844,7 @@ bool ComparativeBoolNode::stringBoolean(thread_db* tdbb, jrd_req* request, dsc* 
 
 		VaryStr<256> temp1;
 		USHORT xtype1;
-		const USHORT l1 = MOV_get_string_ptr(desc1, &xtype1, &p1, &temp1, sizeof(temp1));
+		const USHORT l1 = MOV_get_string_ptr(tdbb, desc1, &xtype1, &p1, &temp1, sizeof(temp1));
 
 		fb_assert(xtype1 == type1);
 
@@ -954,7 +910,7 @@ bool ComparativeBoolNode::stringBoolean(thread_db* tdbb, jrd_req* request, dsc* 
 					break;
 				}
 
-				escape_length = MOV_make_string(desc, type1,
+				escape_length = MOV_make_string(tdbb, desc, type1,
 					reinterpret_cast<const char**>(&escape_str), &temp3, sizeof(temp3));
 
 				if (!escape_length || charset->length(escape_length, escape_str, true) != 1)
@@ -1163,7 +1119,7 @@ bool ComparativeBoolNode::stringFunction(thread_db* tdbb, jrd_req* request,
 				return false;
 			}
 
-			escape_length = MOV_make_string(desc, ttype,
+			escape_length = MOV_make_string(tdbb, desc, ttype,
 				reinterpret_cast<const char**>(&escape_str), &temp3, sizeof(temp3));
 
 			if (!escape_length || charset->length(escape_length, escape_str, true) != 1)
@@ -1302,17 +1258,19 @@ bool ComparativeBoolNode::sleuth(thread_db* tdbb, jrd_req* request, const dsc* d
 
 BoolExprNode* ComparativeBoolNode::createRseNode(DsqlCompilerScratch* dsqlScratch, UCHAR rseBlrOp)
 {
+	MemoryPool& pool = dsqlScratch->getPool();
+
 	// Create a derived table representing our subquery.
-	SelectExprNode* dt = FB_NEW_POOL(getPool()) SelectExprNode(getPool());
+	SelectExprNode* dt = FB_NEW_POOL(pool) SelectExprNode(pool);
 	// Ignore validation for column names that must exist for "user" derived tables.
 	dt->dsqlFlags = RecordSourceNode::DFLAG_DT_IGNORE_COLUMN_CHECK | RecordSourceNode::DFLAG_DERIVED;
 	dt->querySpec = static_cast<RecordSourceNode*>(dsqlSpecialArg.getObject());
 
-	RseNode* querySpec = FB_NEW_POOL(getPool()) RseNode(getPool());
-	querySpec->dsqlFrom = FB_NEW_POOL(getPool()) RecSourceListNode(getPool(), 1);
+	RseNode* querySpec = FB_NEW_POOL(pool) RseNode(pool);
+	querySpec->dsqlFrom = FB_NEW_POOL(pool) RecSourceListNode(pool, 1);
 	querySpec->dsqlFrom->items[0] = dt;
 
-	SelectExprNode* select_expr = FB_NEW_POOL(getPool()) SelectExprNode(getPool());
+	SelectExprNode* select_expr = FB_NEW_POOL(pool) SelectExprNode(pool);
 	select_expr->querySpec = querySpec;
 
 	const DsqlContextStack::iterator base(*dsqlScratch->context);
@@ -1324,7 +1282,7 @@ BoolExprNode* ComparativeBoolNode::createRseNode(DsqlCompilerScratch* dsqlScratc
 
 	// Create a conjunct to be injected.
 
-	ComparativeBoolNode* cmpNode = FB_NEW_POOL(getPool()) ComparativeBoolNode(getPool(), blrOp,
+	ComparativeBoolNode* cmpNode = FB_NEW_POOL(pool) ComparativeBoolNode(pool, blrOp,
 		doDsqlPass(dsqlScratch, arg1, false), rse->dsqlSelectList->items[0]);
 
 	PASS1_set_parameter_type(dsqlScratch, cmpNode->arg1, cmpNode->arg2, false);
@@ -1332,7 +1290,7 @@ BoolExprNode* ComparativeBoolNode::createRseNode(DsqlCompilerScratch* dsqlScratc
 	rse->dsqlWhere = cmpNode;
 
 	// Create output node.
-	RseBoolNode* rseBoolNode = FB_NEW_POOL(getPool()) RseBoolNode(getPool(), rseBlrOp, rse);
+	RseBoolNode* rseBoolNode = FB_NEW_POOL(pool) RseBoolNode(pool, rseBlrOp, rse);
 
 	// Finish off by cleaning up contexts
 	dsqlScratch->unionContext.clear(baseUnion);
@@ -1353,7 +1311,6 @@ MissingBoolNode::MissingBoolNode(MemoryPool& pool, ValueExprNode* aArg, bool aDs
 	  dsqlUnknown(aDsqlUnknown),
 	  arg(aArg)
 {
-	addChildNode(arg, arg);
 }
 
 DmlNode* MissingBoolNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* csb, const UCHAR /*blrOp*/)
@@ -1375,7 +1332,7 @@ string MissingBoolNode::internalPrint(NodePrinter& printer) const
 
 BoolExprNode* MissingBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 {
-	MissingBoolNode* node = FB_NEW_POOL(getPool()) MissingBoolNode(getPool(),
+	MissingBoolNode* node = FB_NEW_POOL(dsqlScratch->getPool()) MissingBoolNode(dsqlScratch->getPool(),
 		doDsqlPass(dsqlScratch, arg));
 
 	PASS1_set_parameter_type(dsqlScratch, node->arg, (dsc*) NULL, false);
@@ -1414,7 +1371,7 @@ BoolExprNode* MissingBoolNode::pass1(thread_db* tdbb, CompilerScratch* csb)
 
 void MissingBoolNode::pass2Boolean2(thread_db* tdbb, CompilerScratch* csb)
 {
-	RecordKeyNode* keyNode = arg->as<RecordKeyNode>();
+	RecordKeyNode* keyNode = nodeAs<RecordKeyNode>(arg);
 
 	if (keyNode && keyNode->aggregate)
 		ERR_post(Arg::Gds(isc_bad_dbkey));
@@ -1447,7 +1404,6 @@ NotBoolNode::NotBoolNode(MemoryPool& pool, BoolExprNode* aArg)
 	: TypedNode<BoolExprNode, ExprNode::TYPE_NOT_BOOL>(pool),
 	  arg(aArg)
 {
-	addChildNode(arg, arg);
 }
 
 DmlNode* NotBoolNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* csb, const UCHAR /*blrOp*/)
@@ -1487,7 +1443,7 @@ BoolExprNode* NotBoolNode::copy(thread_db* tdbb, NodeCopier& copier) const
 
 BoolExprNode* NotBoolNode::pass1(thread_db* tdbb, CompilerScratch* csb)
 {
-	RseBoolNode* rseBoolean = arg->as<RseBoolNode>();
+	RseBoolNode* rseBoolean = nodeAs<RseBoolNode>(arg);
 
 	if (rseBoolean)
 	{
@@ -1514,7 +1470,8 @@ bool NotBoolNode::execute(thread_db* tdbb, jrd_req* request) const
 // Get rid of redundant nested NOT predicates.
 BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert)
 {
-	NotBoolNode* notArg = arg->as<NotBoolNode>();
+	MemoryPool& pool = dsqlScratch->getPool();
+	NotBoolNode* notArg = nodeAs<NotBoolNode>(arg);
 
 	if (notArg)
 	{
@@ -1525,12 +1482,12 @@ BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert
 	if (!invert)
 		return arg->dsqlPass(dsqlScratch);
 
-	ComparativeBoolNode* cmpArg = arg->as<ComparativeBoolNode>();
-	BinaryBoolNode* binArg = arg->as<BinaryBoolNode>();
+	ComparativeBoolNode* cmpArg = nodeAs<ComparativeBoolNode>(arg);
+	BinaryBoolNode* binArg = nodeAs<BinaryBoolNode>(arg);
 
 	// Do not handle special case: <value> NOT IN <list>
 
-	if (cmpArg && (!cmpArg->dsqlSpecialArg || !cmpArg->dsqlSpecialArg->is<ValueListNode>()))
+	if (cmpArg && (!cmpArg->dsqlSpecialArg || !nodeIs<ValueListNode>(cmpArg->dsqlSpecialArg)))
 	{
 		// Invert the given boolean.
 		switch (cmpArg->blrOp)
@@ -1569,8 +1526,8 @@ BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert
 						return NULL;
 				}
 
-				ComparativeBoolNode* node = FB_NEW_POOL(getPool()) ComparativeBoolNode(
-					getPool(), newBlrOp, cmpArg->arg1, cmpArg->arg2);
+				ComparativeBoolNode* node = FB_NEW_POOL(pool) ComparativeBoolNode(
+					pool, newBlrOp, cmpArg->arg1, cmpArg->arg2);
 				node->dsqlSpecialArg = cmpArg->dsqlSpecialArg;
 				node->dsqlCheckBoolean = cmpArg->dsqlCheckBoolean;
 
@@ -1584,13 +1541,13 @@ BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert
 
 			case blr_between:
 			{
-				ComparativeBoolNode* cmpNode1 = FB_NEW_POOL(getPool()) ComparativeBoolNode(getPool(),
+				ComparativeBoolNode* cmpNode1 = FB_NEW_POOL(pool) ComparativeBoolNode(pool,
 					blr_lss, cmpArg->arg1, cmpArg->arg2);
 
-				ComparativeBoolNode* cmpNode2 = FB_NEW_POOL(getPool()) ComparativeBoolNode(getPool(),
+				ComparativeBoolNode* cmpNode2 = FB_NEW_POOL(pool) ComparativeBoolNode(pool,
 					blr_gtr, cmpArg->arg1, cmpArg->arg3);
 
-				BinaryBoolNode* node = FB_NEW_POOL(getPool()) BinaryBoolNode(getPool(), blr_or,
+				BinaryBoolNode* node = FB_NEW_POOL(pool) BinaryBoolNode(pool, blr_or,
 					cmpNode1, cmpNode2);
 
 				return node->dsqlPass(dsqlScratch);
@@ -1606,10 +1563,10 @@ BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert
 			{
 				UCHAR newBlrOp = binArg->blrOp == blr_and ? blr_or : blr_and;
 
-				NotBoolNode* notNode1 = FB_NEW_POOL(getPool()) NotBoolNode(getPool(), binArg->arg1);
-				NotBoolNode* notNode2 = FB_NEW_POOL(getPool()) NotBoolNode(getPool(), binArg->arg2);
+				NotBoolNode* notNode1 = FB_NEW_POOL(pool) NotBoolNode(pool, binArg->arg1);
+				NotBoolNode* notNode2 = FB_NEW_POOL(pool) NotBoolNode(pool, binArg->arg2);
 
-				BinaryBoolNode* node = FB_NEW_POOL(getPool()) BinaryBoolNode(getPool(), newBlrOp,
+				BinaryBoolNode* node = FB_NEW_POOL(pool) BinaryBoolNode(pool, newBlrOp,
 					notNode1, notNode2);
 
 				return node->dsqlPass(dsqlScratch);
@@ -1620,7 +1577,7 @@ BoolExprNode* NotBoolNode::process(DsqlCompilerScratch* dsqlScratch, bool invert
 	// No inversion is possible, so just recreate the input node
 	// and return immediately to avoid infinite recursion later.
 
-	return FB_NEW_POOL(getPool()) NotBoolNode(getPool(), doDsqlPass(dsqlScratch, arg));
+	return FB_NEW_POOL(pool) NotBoolNode(pool, doDsqlPass(dsqlScratch, arg));
 }
 
 
@@ -1641,7 +1598,6 @@ RseBoolNode::RseBoolNode(MemoryPool& pool, UCHAR aBlrOp, RecordSourceNode* aDsql
 	  rse(NULL),
 	  subQuery(NULL)
 {
-	addChildNode(dsqlRse, rse);
 }
 
 DmlNode* RseBoolNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* csb, const UCHAR blrOp)
@@ -1684,8 +1640,8 @@ BoolExprNode* RseBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 
 	const DsqlContextStack::iterator base(*dsqlScratch->context);
 
-	RseBoolNode* node = FB_NEW_POOL(getPool()) RseBoolNode(getPool(), blrOp,
-		PASS1_rse(dsqlScratch, dsqlRse->as<SelectExprNode>(), false));
+	RseBoolNode* node = FB_NEW_POOL(dsqlScratch->getPool()) RseBoolNode(dsqlScratch->getPool(), blrOp,
+		PASS1_rse(dsqlScratch, nodeAs<SelectExprNode>(dsqlRse), false));
 
 	// Finish off by cleaning up contexts
 	dsqlScratch->context->clear(base);
@@ -1696,26 +1652,26 @@ BoolExprNode* RseBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 void RseBoolNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 {
 	dsqlScratch->appendUChar(blrOp);
-	GEN_rse(dsqlScratch, dsqlRse->as<RseNode>());
+	GEN_rse(dsqlScratch, nodeAs<RseNode>(dsqlRse));
 }
 
-bool RseBoolNode::dsqlMatch(const ExprNode* other, bool ignoreMapCast) const
+bool RseBoolNode::dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const
 {
-	if (!BoolExprNode::dsqlMatch(other, ignoreMapCast))
+	if (!BoolExprNode::dsqlMatch(dsqlScratch, other, ignoreMapCast))
 		return false;
 
-	const RseBoolNode* o = other->as<RseBoolNode>();
+	const RseBoolNode* o = nodeAs<RseBoolNode>(other);
 	fb_assert(o);
 
 	return blrOp == o->blrOp;
 }
 
-bool RseBoolNode::sameAs(const ExprNode* other, bool ignoreStreams) const
+bool RseBoolNode::sameAs(CompilerScratch* csb, const ExprNode* other, bool ignoreStreams) const
 {
-	if (!BoolExprNode::sameAs(other, ignoreStreams))
+	if (!BoolExprNode::sameAs(csb, other, ignoreStreams))
 		return false;
 
-	const RseBoolNode* const otherNode = other->as<RseBoolNode>();
+	const RseBoolNode* const otherNode = nodeAs<RseBoolNode>(other);
 	fb_assert(otherNode);
 
 	return blrOp == otherNode->blrOp;
@@ -1769,7 +1725,7 @@ BoolExprNode* RseBoolNode::pass1(thread_db* tdbb, CompilerScratch* csb)
 			BoolExprNode* boolean = rse->rse_boolean;
 			if (boolean)
 			{
-				BinaryBoolNode* const binaryNode = boolean->as<BinaryBoolNode>();
+				BinaryBoolNode* const binaryNode = nodeAs<BinaryBoolNode>(boolean);
 				if (binaryNode && binaryNode->blrOp == blr_and)
 					boolean = binaryNode->arg2;
 
@@ -1895,7 +1851,7 @@ BoolExprNode* RseBoolNode::convertNeqAllToNotAny(thread_db* tdbb, CompilerScratc
 
 	if (!outerRse || outerRse->type != RseNode::TYPE || outerRse->rse_relations.getCount() != 1 ||
 		!outerRse->rse_boolean ||
-		!(outerRseNeq = outerRse->rse_boolean->as<ComparativeBoolNode>()) ||
+		!(outerRseNeq = nodeAs<ComparativeBoolNode>(outerRse->rse_boolean)) ||
 		outerRseNeq->blrOp != blr_neq)
 	{
 		return NULL;
@@ -1929,7 +1885,7 @@ BoolExprNode* RseBoolNode::convertNeqAllToNotAny(thread_db* tdbb, CompilerScratc
 
 	andNode->arg2 = rseBoolNode;
 
-	RseNode* newInnerRse = innerRse->clone();
+	RseNode* newInnerRse = innerRse->clone(csb->csb_pool);
 	newInnerRse->ignoreDbKey(tdbb, csb);
 
 	rseBoolNode = FB_NEW_POOL(csb->csb_pool) RseBoolNode(csb->csb_pool, blr_any);
@@ -1960,8 +1916,7 @@ BoolExprNode* RseBoolNode::convertNeqAllToNotAny(thread_db* tdbb, CompilerScratc
 
 	newInnerRse->rse_boolean = boolean;
 
-	SubExprNodeCopier copier(tdbb, csb);
-
+	SubExprNodeCopier copier(csb->csb_pool, csb);
 	return copier.copy(tdbb, static_cast<BoolExprNode*>(newNode));
 }
 

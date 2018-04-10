@@ -34,11 +34,13 @@ namespace Jrd {
 class blb;
 class jrd_tra;
 class DsqlCursor;
+class DsqlBatch;
 class dsql_req;
 class JrdStatement;
 class StableAttachmentPart;
 class Attachment;
 class Service;
+class UserId;
 
 // forward declarations
 class JStatement;
@@ -180,6 +182,44 @@ private:
 	void freeEngineData(Firebird::CheckStatusWrapper* status);
 };
 
+class JBatch FB_FINAL :
+	public Firebird::RefCntIface<Firebird::IBatchImpl<JBatch, Firebird::CheckStatusWrapper> >
+{
+public:
+	// IBatch implementation
+	int release();
+	void add(Firebird::CheckStatusWrapper* status, unsigned count, const void* inBuffer);
+	void addBlob(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer, ISC_QUAD* blobId,
+		unsigned parLength, const unsigned char* par);
+	void appendBlobData(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer);
+	void addBlobStream(Firebird::CheckStatusWrapper* status, unsigned length, const void* inBuffer);
+	void registerBlob(Firebird::CheckStatusWrapper* status, const ISC_QUAD* existingBlob, ISC_QUAD* blobId);
+	Firebird::IBatchCompletionState* execute(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction);
+	void cancel(Firebird::CheckStatusWrapper* status);
+	unsigned getBlobAlignment(Firebird::CheckStatusWrapper* status);
+	Firebird::IMessageMetadata* getMetadata(Firebird::CheckStatusWrapper* status);
+	void setDefaultBpb(Firebird::CheckStatusWrapper* status, unsigned parLength, const unsigned char* par);
+
+public:
+	JBatch(DsqlBatch* handle, JStatement* aStatement);
+
+	StableAttachmentPart* getAttachment();
+
+	DsqlBatch* getHandle() throw()
+	{
+		return batch;
+	}
+
+	void resetHandle()
+	{
+		batch = NULL;
+	}
+
+private:
+	DsqlBatch* batch;
+	Firebird::RefPtr<JStatement> statement;
+};
+
 class JStatement FB_FINAL :
 	public Firebird::RefCntIface<Firebird::IStatementImpl<JStatement, Firebird::CheckStatusWrapper> >
 {
@@ -203,6 +243,11 @@ public:
 		Firebird::IMessageMetadata* outMetadata, unsigned int flags);
 	void setCursorName(Firebird::CheckStatusWrapper* status, const char* name);
 	unsigned getFlags(Firebird::CheckStatusWrapper* status);
+
+	unsigned int getTimeout(Firebird::CheckStatusWrapper* status);
+	void setTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	JBatch* createBatch(Firebird::CheckStatusWrapper* status, Firebird::IMessageMetadata* inMetadata,
+		unsigned parLength, const unsigned char* par);
 
 public:
 	JStatement(dsql_req* handle, StableAttachmentPart* sa, Firebird::Array<UCHAR>& meta);
@@ -232,15 +277,15 @@ public:
 	// IRequest implementation
 	int release();
 	void receive(Firebird::CheckStatusWrapper* status, int level, unsigned int msg_type,
-		unsigned int length, unsigned char* message);
+		unsigned int length, void* message);
 	void send(Firebird::CheckStatusWrapper* status, int level, unsigned int msg_type,
-		unsigned int length, const unsigned char* message);
+		unsigned int length, const void* message);
 	void getInfo(Firebird::CheckStatusWrapper* status, int level,
 		unsigned int itemsLength, const unsigned char* items,
 		unsigned int bufferLength, unsigned char* buffer);
 	void start(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* tra, int level);
 	void startAndSend(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* tra, int level,
-		unsigned int msg_type, unsigned int length, const unsigned char* message);
+		unsigned int msg_type, unsigned int length, const void* message);
 	void unwind(Firebird::CheckStatusWrapper* status, int level);
 	void free(Firebird::CheckStatusWrapper* status);
 
@@ -344,6 +389,14 @@ public:
 	void detach(Firebird::CheckStatusWrapper* status);
 	void dropDatabase(Firebird::CheckStatusWrapper* status);
 
+	unsigned int getIdleTimeout(Firebird::CheckStatusWrapper* status);
+	void setIdleTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	unsigned int getStatementTimeout(Firebird::CheckStatusWrapper* status);
+	void setStatementTimeout(Firebird::CheckStatusWrapper* status, unsigned int timeOut);
+	Firebird::IBatch* createBatch(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* transaction,
+		unsigned stmtLength, const char* sqlStmt, unsigned dialect,
+		Firebird::IMessageMetadata* inMetadata, unsigned parLength, const unsigned char* par);
+
 public:
 	explicit JAttachment(StableAttachmentPart* js);
 
@@ -364,9 +417,16 @@ public:
 	jrd_tra* getEngineTransaction(Firebird::CheckStatusWrapper* status, Firebird::ITransaction* tra);
 
 private:
+	friend class StableAttachmentPart;
+
 	StableAttachmentPart* att;
 
 	void freeEngineData(Firebird::CheckStatusWrapper* status, bool forceFree);
+
+	void detachEngine()
+	{
+		att = NULL;
+	}
 };
 
 class JService FB_FINAL :
@@ -390,8 +450,6 @@ public:
 private:
 	void freeEngineData(Firebird::CheckStatusWrapper* status);
 };
-
-const static int INTERNAL_ATT_OVERWRITE_CHECK = 0x01;
 
 class JProvider FB_FINAL :
 	public Firebird::StdPlugin<Firebird::IProviderImpl<JProvider, Firebird::CheckStatusWrapper> >
@@ -427,8 +485,8 @@ public:
 	int release();
 
 private:
-	JAttachment* internalAttach(Firebird::CheckStatusWrapper* status, const char* fileName,
-		unsigned int dpbLength, const unsigned char* dpb, unsigned int internalFlags);
+	JAttachment* internalAttach(Firebird::CheckStatusWrapper* status, const char* const fileName,
+		unsigned int dpbLength, const unsigned char* dpb, const UserId* existingId);
 	Firebird::ICryptKeyCallback* cryptCallback;
 	Firebird::IPluginConfig* pluginConfig;
 };

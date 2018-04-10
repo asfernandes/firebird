@@ -137,6 +137,11 @@ public:
 				storeField(field_id, VALUE_TIMESTAMP, sizeof(ISC_TIMESTAMP), &value.value());
 		}
 
+		void storeTimestamp(int field_id, const ISC_TIMESTAMP& value)
+		{
+			storeField(field_id, VALUE_TIMESTAMP, sizeof(ISC_TIMESTAMP), &value);
+		}
+
 		void storeString(int field_id, const Firebird::string& value)
 		{
 			if (value.length())
@@ -352,8 +357,9 @@ public:
 	{}
 
 protected:
-	const Format* getFormat(thread_db* tdbb, jrd_rel* relation) const;
-	bool retrieveRecord(thread_db* tdbb, jrd_rel* relation, FB_UINT64 position, Record* record) const;
+	const Format* getFormat(thread_db* tdbb, jrd_rel* relation) const override;
+	bool retrieveRecord(thread_db* tdbb, jrd_rel* relation, FB_UINT64 position,
+		Record* record) const override;
 };
 
 

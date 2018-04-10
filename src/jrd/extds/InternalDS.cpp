@@ -118,7 +118,7 @@ InternalConnection::~InternalConnection()
 }
 
 // Status helper
-class IntStatus : public Jrd::FbLocalStatus
+class IntStatus : public Firebird::FbLocalStatus
 {
 public:
 	explicit IntStatus(FbStatusVector *p)
@@ -147,7 +147,8 @@ void InternalConnection::attach(thread_db* tdbb, const PathName& dbName,
 	setWrapErrors(false);
 
 	Jrd::Attachment* attachment = tdbb->getAttachment();
-	if ((user.isEmpty() || user == attachment->att_user->getUserName()) &&
+	if (attachment->att_user &&
+		(user.isEmpty() || user == attachment->att_user->getUserName()) &&
 		pwd.isEmpty() &&
 		(role.isEmpty() || role == attachment->att_user->getSqlRole()))
 	{
@@ -218,7 +219,7 @@ void InternalConnection::doDetach(thread_db* tdbb)
 	fb_assert(!m_attachment);
 }
 
-bool InternalConnection::cancelExecution()
+bool InternalConnection::cancelExecution(bool /*forced*/)
 {
 	if (!m_attachment->getHandle())
 		return false;
@@ -249,7 +250,8 @@ bool InternalConnection::isSameDatabase(thread_db* tdbb, const PathName& dbName,
 	if (m_isCurrent)
 	{
 		const UserId* attUser = m_attachment->getHandle()->att_user;
-		return ((user.isEmpty() || user == attUser->getUserName()) &&
+		return (attUser &&
+				(user.isEmpty() || user == attUser->getUserName()) &&
 				pwd.isEmpty() &&
 				(role.isEmpty() || role == attUser->getSqlRole()));
 	}
@@ -283,7 +285,7 @@ void InternalTransaction::doStart(FbStatusVector* status, thread_db* tdbb, Clump
 	fb_assert(localTran);
 
 	if (m_scope == traCommon && m_IntConnection.isCurrent())
-		m_transaction = localTran->getInterface();
+		m_transaction = localTran->getInterface(true);
 	else
 	{
 		JAttachment* att = m_IntConnection.getJrdAtt();
@@ -406,19 +408,20 @@ void InternalStatement::doPrepare(thread_db* tdbb, const string& sql)
 				statement = statement->parentStatement;
 
 			if (statement && statement->triggerName.hasData())
-				tran->getHandle()->tra_caller_name = CallerName(obj_trigger, statement->triggerName);
+				tran->getHandle()->tra_caller_name = CallerName(obj_trigger, statement->triggerName, statement->triggerOwner);
 			else if (statement && (routine = statement->getRoutine()) &&
 				routine->getName().identifier.hasData())
 			{
+				const MetaName& userName = routine->ssDefiner.specified && routine->ssDefiner.value ? routine->owner : "";
 				if (routine->getName().package.isEmpty())
 				{
 					tran->getHandle()->tra_caller_name = CallerName(routine->getObjectType(),
-						routine->getName().identifier);
+						routine->getName().identifier, userName);
 				}
 				else
 				{
 					tran->getHandle()->tra_caller_name = CallerName(obj_package_header,
-						routine->getName().package);
+						routine->getName().package, userName);
 				}
 			}
 			else
@@ -501,6 +504,21 @@ void InternalStatement::doPrepare(thread_db* tdbb, const string& sql)
 	case DsqlCompiledStatement::TYPE_EXEC_BLOCK:
 		break;
 	}
+}
+
+
+void InternalStatement::doSetTimeout(thread_db* tdbb, unsigned int timeout)
+{
+	FbLocalStatus status;
+
+	{
+		EngineCallbackGuard guard(tdbb, *this, FB_FUNCTION);
+
+		m_request->setTimeout(&status, timeout);
+	}
+
+	if (status->getState() & IStatus::STATE_ERRORS)
+		raise(&status, tdbb, "JStatement::setTimeout");
 }
 
 

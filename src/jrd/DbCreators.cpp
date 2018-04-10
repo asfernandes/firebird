@@ -73,12 +73,13 @@ bool openDb(const char* securityDb, RefPtr<IAttachment>& att, RefPtr<ITransactio
 	ClumpletWriter embeddedAttach(ClumpletWriter::Tagged, MAX_DPB_SIZE, isc_dpb_version1);
 	embeddedAttach.insertString(isc_dpb_user_name, DBA_USER_NAME, fb_strlen(DBA_USER_NAME));
 	embeddedAttach.insertByte(isc_dpb_sec_attach, TRUE);
+	embeddedAttach.insertString(isc_dpb_config, EMBEDDED_PROVIDERS, fb_strlen(EMBEDDED_PROVIDERS));
 	embeddedAttach.insertByte(isc_dpb_no_db_triggers, TRUE);
 
 	FbLocalStatus st;
 	DispatcherPtr prov;
-	att = prov->attachDatabase(&st, securityDb,
-		embeddedAttach.getBufferLength(), embeddedAttach.getBuffer());
+	att.assignRefNoIncr(prov->attachDatabase(&st, securityDb,
+		embeddedAttach.getBufferLength(), embeddedAttach.getBuffer()));
 	if (st->getState() & IStatus::STATE_ERRORS)
 	{
 		if (!fb_utils::containsErrorCode(st->getErrors(), isc_io_error))
@@ -91,7 +92,7 @@ bool openDb(const char* securityDb, RefPtr<IAttachment>& att, RefPtr<ITransactio
 	ClumpletWriter readOnly(ClumpletWriter::Tpb, MAX_DPB_SIZE, isc_tpb_version1);
 	readOnly.insertTag(isc_tpb_read);
 	readOnly.insertTag(isc_tpb_wait);
-	tra = att->startTransaction(&st, readOnly.getBufferLength(), readOnly.getBuffer());
+	tra.assignRefNoIncr(att->startTransaction(&st, readOnly.getBufferLength(), readOnly.getBuffer()));
 	check("IAttachment::startTransaction", &st);
 
 	return true;
@@ -237,7 +238,7 @@ bool checkCreateDatabaseGrant(const MetaName& userName, const MetaName& trustedR
 		"       where p.rdb$privilege = 'M' and (p.rdb$field_name = 'D' or t.ur = 1)) "
 		"select r.rdb$system_privileges "
 		"   from role_tree t join rdb$roles r on t.nm = r.rdb$role_name ";
-	RefPtr<IResultSet> rs(att->openCursor(&st, tra, 0, sql,
+	RefPtr<IResultSet> rs(REF_NO_INCR, att->openCursor(&st, tra, 0, sql,
 		SQL_DIALECT_V6, par2.getMetadata(), par2.getBuffer(), res2.getMetadata(), NULL, 0));
 	check("IAttachment::execute", &st);
 
@@ -307,7 +308,7 @@ RecordBuffer* DbCreatorsList::getList(thread_db* tdbb, jrd_rel* relation)
 	Field<Varying> u(gr, MAX_SQL_IDENTIFIER_LEN);
 
 	FbLocalStatus st;
-	RefPtr<IResultSet> curs(att->openCursor(&st, tra, 0,
+	RefPtr<IResultSet> curs(REF_NO_INCR, att->openCursor(&st, tra, 0,
 		"select RDB$USER_TYPE, RDB$USER from RDB$DB_CREATORS",
 		SQL_DIALECT_V6, NULL, NULL, gr.getMetadata(), NULL, 0));
 

@@ -104,7 +104,7 @@ static void show_index(SCHAR*, SCHAR*, const SSHORT, const SSHORT, const SSHORT)
 static processing_state show_indices(const SCHAR* const*);
 static processing_state show_proc(const SCHAR*);
 static processing_state show_packages(const SCHAR* package_name);
-static processing_state show_role(const SCHAR*, bool, const char* msg = 0);
+static processing_state show_role(const SCHAR*, bool, const char* msg = NULL);
 static processing_state show_secclass(const char* object, const char* opt);
 static processing_state show_table(const SCHAR*, bool);
 static processing_state show_trigger(const SCHAR*, bool, bool);
@@ -392,7 +392,7 @@ bool SHOW_dbb_parameters(Firebird::IAttachment* db_handle,
 	UCHAR buffer[BUFFER_LENGTH400];
 	TEXT msg[MSG_LENGTH];
 
-	Firebird::AutoPtr<Firebird::IStatus, Firebird::SimpleDispose<Firebird::IStatus> >
+	Firebird::AutoPtr<Firebird::IStatus, Firebird::SimpleDispose>
 		status_vector(fbMaster->getStatus());
 	Firebird::CheckStatusWrapper statusWrapper(status_vector);
 	db_handle->getInfo(&statusWrapper, item_length, db_itemsL, sizeof(buffer), buffer);
@@ -702,8 +702,8 @@ static void set_grantee(int user_type, const char* SQL_identifier, char* user_st
 		break;
 	case obj_privilege:
 		FOR T IN RDB$TYPES
-			WITH T.RDB$FIELD_NAME EQ 'RDB$SYSTEM_PRIVILEGES'
-			 AND T.RDB$TYPE EQ atoi(SQL_identifier)
+			WITH T.RDB$FIELD_NAME EQ 'RDB$SYSTEM_PRIVILEGES' AND
+				 T.RDB$TYPE EQ atoi(SQL_identifier)
 		{
 			sprintf(user_string, "SYSTEM PRIVILEGE %s", fb_utils::exact_name(T.RDB$TYPE_NAME));
 		}
@@ -3544,6 +3544,9 @@ static void show_db()
 		if (!DBB2.RDB$LINGER.NULL && DBB2.RDB$LINGER > 0)
 			isqlGlob.printf("Linger: %d seconds%s", DBB2.RDB$LINGER, NEWLINE);
 
+		if (!DBB2.RDB$SQL_SECURITY.NULL && DBB2.RDB$SQL_SECURITY == FB_TRUE)
+			isqlGlob.printf("SQL SECURITY DEFINER%s", NEWLINE);
+
 		if (++pass > 1)
 			isqlGlob.printf("RDB$DATABASE has more than one record%s", NEWLINE);
 
@@ -3842,7 +3845,7 @@ static processing_state show_domains(const SCHAR* domain_name)
 			first = false;
 			// Print the name of the domain
 			fb_utils::exact_name(FLD.RDB$FIELD_NAME);
-			isqlGlob.printf("%-32s", FLD.RDB$FIELD_NAME);
+			isqlGlob.printf("%-31s ", FLD.RDB$FIELD_NAME);
 
 			// Array dimensions
 			if (!FLD.RDB$DIMENSIONS.NULL)
@@ -3852,8 +3855,11 @@ static processing_state show_domains(const SCHAR* domain_name)
 				isqlGlob.printf("%s                                ", NEWLINE);
 			}
 
-			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SCALE))
+			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SUB_TYPE,
+					FLD.RDB$FIELD_PRECISION, FLD.RDB$FIELD_SCALE))
+			{
 				return ps_ERR;
+			}
 
 			// Length for CHARs
 			if ((FLD.RDB$FIELD_TYPE == T_CHAR) || (FLD.RDB$FIELD_TYPE == VARCHAR)) {
@@ -3874,8 +3880,8 @@ static processing_state show_domains(const SCHAR* domain_name)
 			}
 
 			// Show international character sets
-			if (FLD.RDB$FIELD_TYPE == T_CHAR ||
-				FLD.RDB$FIELD_TYPE == VARCHAR ||
+			if (((FLD.RDB$FIELD_TYPE == T_CHAR ||
+				FLD.RDB$FIELD_TYPE == VARCHAR) && FLD.RDB$FIELD_SUB_TYPE == fb_text_subtype_text) ||
 				FLD.RDB$FIELD_TYPE == BLOB)
 			{
 				show_charsets(NULL, FLD.RDB$FIELD_NAME, true, false, false, false);
@@ -4265,6 +4271,12 @@ static processing_state show_func(const SCHAR* funcname)
 			isqlGlob.printf("External name: %s%s", FUN.RDB$ENTRYPOINT, NEWLINE);
 		}
 
+		if (!FUN.RDB$SQL_SECURITY.NULL)
+		{
+			const char* ss = FUN.RDB$SQL_SECURITY ? "DEFINER" : "INVOKER";
+			isqlGlob.printf("SQL SECURITY: %s%s", ss, NEWLINE);
+		}
+
 		if (!FUN.RDB$ENGINE_NAME.NULL)
 		{
 			fb_utils::exact_name(FUN.RDB$ENGINE_NAME);
@@ -4342,8 +4354,11 @@ static processing_state show_func(const SCHAR* funcname)
 				}
 			}
 
-			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SCALE))
+			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SUB_TYPE,
+					FLD.RDB$FIELD_PRECISION, FLD.RDB$FIELD_SCALE))
+			{
 				return ps_ERR;
+			}
 
 			// Use RDB$CHARACTER_LENGTH instead of RDB$FIELD_LENGTH
 			//   FSG 19.Nov.2000
@@ -4355,8 +4370,8 @@ static processing_state show_func(const SCHAR* funcname)
 
 			// Show international character sets and collations
 
-			if (FLD.RDB$FIELD_TYPE == T_CHAR ||
-				FLD.RDB$FIELD_TYPE == VARCHAR  ||
+			if (((FLD.RDB$FIELD_TYPE == T_CHAR ||
+				FLD.RDB$FIELD_TYPE == VARCHAR) && FLD.RDB$FIELD_SUB_TYPE == fb_text_subtype_text) ||
 				FLD.RDB$FIELD_TYPE == BLOB)
 			{
 				SSHORT charset = 0, collation = 0;
@@ -4826,9 +4841,15 @@ static processing_state show_packages(const SCHAR* package_name)
 			first = false;
 			// Print the name of the package
 			fb_utils::exact_name(PACK.RDB$PACKAGE_NAME);
-			isqlGlob.printf("%-32s", PACK.RDB$PACKAGE_NAME);
+			isqlGlob.printf("%-31s ", PACK.RDB$PACKAGE_NAME);
 
 			isqlGlob.printf(NEWLINE);
+
+			if (!PACK.RDB$SQL_SECURITY.NULL)
+			{
+				const char* ss = PACK.RDB$SQL_SECURITY ? "DEFINER" : "INVOKER";
+				isqlGlob.printf("SQL SECURITY: %s%s", ss, NEWLINE);
+			}
 
 			if (!PACK.RDB$PACKAGE_HEADER_SOURCE.NULL)
 			{
@@ -5124,6 +5145,12 @@ static processing_state show_proc(const SCHAR* procname)
 			isqlGlob.printf("External name: %s%s", PRC.RDB$ENTRYPOINT, NEWLINE);
 		}
 
+		if (!PRC.RDB$SQL_SECURITY.NULL)
+		{
+			const char* ss = PRC.RDB$SQL_SECURITY ? "DEFINER" : "INVOKER";
+			isqlGlob.printf("SQL SECURITY: %s%s", ss, NEWLINE);
+		}
+
 		if (!PRC.RDB$ENGINE_NAME.NULL)
 		{
 			fb_utils::exact_name(PRC.RDB$ENGINE_NAME);
@@ -5223,8 +5250,11 @@ static processing_state show_proc(const SCHAR* procname)
 				}
 			}
 
-			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SCALE))
+			if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SUB_TYPE,
+					FLD.RDB$FIELD_PRECISION, FLD.RDB$FIELD_SCALE))
+			{
 				return ps_ERR;
+			}
 
 			// Use RDB$CHARACTER_LENGTH instead of RDB$FIELD_LENGTH
 			//   FSG 19.Nov.2000
@@ -5236,8 +5266,8 @@ static processing_state show_proc(const SCHAR* procname)
 
 			// Show international character sets and collations
 
-			if (FLD.RDB$FIELD_TYPE == T_CHAR ||
-				FLD.RDB$FIELD_TYPE == VARCHAR  ||
+			if (((FLD.RDB$FIELD_TYPE == T_CHAR ||
+				FLD.RDB$FIELD_TYPE == VARCHAR) && FLD.RDB$FIELD_SUB_TYPE == fb_text_subtype_text) ||
 				FLD.RDB$FIELD_TYPE == BLOB)
 			{
 				SSHORT charset = 0;
@@ -5309,8 +5339,8 @@ bool SHOW_system_privileges(const char* role, const char* prefix, bool lf)
 					if (b & (1 << bit))
 					{
 						FOR T IN RDB$TYPES
-							WITH T.RDB$FIELD_NAME EQ 'RDB$SYSTEM_PRIVILEGES'
-							 AND T.RDB$TYPE EQ (byte * 8 + bit)
+							WITH T.RDB$FIELD_NAME EQ 'RDB$SYSTEM_PRIVILEGES' AND
+								 T.RDB$TYPE EQ (byte * 8 + bit)
 						{
 							if (first)
 							{
@@ -5682,6 +5712,12 @@ static processing_state show_table(const SCHAR* relation_name, bool isView)
 		WITH REL.RDB$RELATION_NAME EQ relation_name
 		if (first)
 		{
+			if (!REL.RDB$SQL_SECURITY.NULL)
+			{
+				const char* ss = REL.RDB$SQL_SECURITY ? "DEFINER" : "INVOKER";
+				isqlGlob.printf("SQL SECURITY: %s%s", ss, NEWLINE);
+			}
+
 			if (!REL.RDB$EXTERNAL_FILE.NULL)
 				isqlGlob.printf("External file: %s%s", REL.RDB$EXTERNAL_FILE, NEWLINE);
 		}
@@ -5748,14 +5784,20 @@ static processing_state show_table(const SCHAR* relation_name, bool isView)
 			continue;
 		}
 
-		if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SCALE))
+		if (!ISQL_printNumericType(FLD.RDB$FIELD_NAME, FLD.RDB$FIELD_TYPE, FLD.RDB$FIELD_SUB_TYPE,
+				FLD.RDB$FIELD_PRECISION, FLD.RDB$FIELD_SCALE))
+		{
 			return ps_ERR;
+		}
 
 		if ((FLD.RDB$FIELD_TYPE == T_CHAR) || (FLD.RDB$FIELD_TYPE == VARCHAR)) {
 			isqlGlob.printf("(%d)", ISQL_get_field_length(FLD.RDB$FIELD_NAME));
 
-			// Show international character sets and collations
-			show_charsets(relation_name, RFR.RDB$FIELD_NAME, true, false, false, false);
+			if (FLD.RDB$FIELD_SUB_TYPE == fb_text_subtype_text)
+			{
+				// Show international character sets and collations
+				show_charsets(relation_name, RFR.RDB$FIELD_NAME, true, false, false, false);
+			}
 		}
 
 		if (FLD.RDB$FIELD_TYPE == BLOB)
@@ -5796,7 +5838,11 @@ static processing_state show_table(const SCHAR* relation_name, bool isView)
 		}
 
 		if (!RFR.RDB$GENERATOR_NAME.NULL)
-			isqlGlob.printf("Identity (by default)");
+		{
+			isqlGlob.printf("Identity (%s)",
+				(RFR.RDB$IDENTITY_TYPE == IDENT_TYPE_BY_DEFAULT ? "by default" :
+				 RFR.RDB$IDENTITY_TYPE == IDENT_TYPE_ALWAYS ? "always" : ""));
+		}
 
 		// Handle defaults for columns
 
@@ -6117,11 +6163,15 @@ static processing_state show_trigger(const SCHAR* object, bool show_source, bool
 			first = false;
 		}
 
-		isqlGlob.printf("%s, Sequence: %d, Type: %s, %s%s",
+		const char* ss = TRG.RDB$SQL_SECURITY.NULL ? "" :
+							(TRG.RDB$SQL_SECURITY ? ", SQL SECURITY DEFINER" : ", SQL SECURITY INVOKER");
+
+		isqlGlob.printf("%s, Sequence: %d, Type: %s, %s%s%s",
 				 TRG.RDB$TRIGGER_NAME,
 				 TRG.RDB$TRIGGER_SEQUENCE,
 				 SHOW_trigger_action(TRG.RDB$TRIGGER_TYPE).c_str(),
 				 (TRG.RDB$TRIGGER_INACTIVE ? "Inactive" : "Active"),
+				 ss,
 				 NEWLINE);
 
 		if (show_source)

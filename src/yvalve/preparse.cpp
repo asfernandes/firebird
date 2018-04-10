@@ -25,7 +25,6 @@
 #include "firebird.h"
 #include <stdlib.h>
 #include <string.h>
-//#include "../dsql/chars.h"
 #include "../yvalve/prepa_proto.h"
 #include "../yvalve/gds_proto.h"
 #include "../yvalve/YObjects.h"
@@ -171,9 +170,9 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 		}
 
 		bool hasUser = true;
+		status->init();
 		for (int qStrip = 0; qStrip < 2; ++qStrip)
 		{
-			status->init();
 			hasUser = false;
 
 			Tokens tks;
@@ -298,7 +297,8 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 	}
 	catch (const Exception& ex)
 	{
-		ex.stuffException(status);
+		if (!(status->getState() & IStatus::STATE_ERRORS))
+			ex.stuffException(status);
 		return true;
 	}
 

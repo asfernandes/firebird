@@ -155,7 +155,7 @@
 	FIELD(fld_src_info		, nam_src_info		, dtype_long	, sizeof(SLONG)				, 0							, NULL		, true)
 
 	FIELD(fld_ctx_var_name	, nam_ctx_var_name	, dtype_varying	, 80						, 0							, NULL		, true)
-	FIELD(fld_ctx_var_value	, nam_ctx_var_value	, dtype_varying	, 255						, 0							, NULL		, true)
+	FIELD(fld_ctx_var_value	, nam_ctx_var_value	, dtype_varying	, MAX_VARY_COLUMN_SIZE		, 0							, NULL		, true)
 
 	FIELD(fld_engine_name	, nam_engine_name	, dtype_text	, MAX_SQL_IDENTIFIER_LEN	, dsc_text_type_metadata	, NULL		, true)
 
@@ -194,3 +194,9 @@
 	FIELD(fld_plan			, nam_plan			, dtype_blob	, BLOB_SIZE					, isc_blob_text				, NULL		, true)
 
 	FIELD(fld_system_privileges, nam_system_privileges, dtype_text, 8						, dsc_text_type_fixed		, dflt_no_privs, true)
+	FIELD(fld_b_sql_security, nam_sql_security	, dtype_boolean	, 1							, 0							, NULL		, true)
+
+	FIELD(fld_idle_timeout	, nam_idle_timeout	, dtype_long	, sizeof(SLONG)				, 0							, NULL		, false)
+	FIELD(fld_idle_timer	, nam_idle_timer	, dtype_timestamp, TIMESTAMP_SIZE			, 0							, NULL		, true)
+	FIELD(fld_stmt_timeout	, nam_stmt_timeout	, dtype_long	, sizeof(SLONG)				, 0							, NULL		, false)
+	FIELD(fld_stmt_timer	, nam_stmt_timer	, dtype_timestamp, TIMESTAMP_SIZE			, 0							, NULL		, true)

@@ -37,6 +37,12 @@
 
 #include "gen/parse.h"
 
+namespace Firebird {
+namespace Arg {
+	class StatusVector;
+} // namespace
+} // namespace
+
 namespace Jrd {
 
 class CharSet;
@@ -144,6 +150,11 @@ public:
 		return FB_NEW_POOL(getPool()) Firebird::string(getPool(), s);
 	}
 
+	Lim64String* newLim64String(const Firebird::string& s, int scale)
+	{
+		return FB_NEW_POOL(getPool()) Lim64String(getPool(), s, scale);
+	}
+
 	IntlString* newIntlString(const Firebird::string& s, const char* charSet = NULL)
 	{
 		return FB_NEW_POOL(getPool()) IntlString(getPool(), s, charSet);
@@ -209,7 +220,7 @@ private:
 
 	BoolExprNode* valueToBool(ValueExprNode* value)
 	{
-		BoolAsValueNode* node = value->as<BoolAsValueNode>();
+		BoolAsValueNode* node = nodeAs<BoolAsValueNode>(value);
 		if (node)
 			return node->boolean;
 
@@ -220,11 +231,17 @@ private:
 		return cmpNode;
 	}
 
+	MemoryPool& getStatementPool()
+	{
+		return scratch->getStatement()->getPool();
+	}
+
 	void yyReducePosn(YYPOSN& ret, YYPOSN* termPosns, YYSTYPE* termVals,
 		int termNo, int stkPos, int yychar, YYPOSN& yyposn, void*);
 
 	int yylex();
 	bool yylexSkipSpaces();
+	bool yylexSkipEol();	// returns true if EOL is detected and skipped
 	int yylexAux();
 
 	void yyerror(const TEXT* error_string);
@@ -234,7 +251,8 @@ private:
 	void check_bound(const char* const to, const char* const string);
 	void check_copy_incr(char*& to, const char ch, const char* const string);
 
-	void yyabandon(SLONG, ISC_STATUS);
+	void yyabandon(const Position& position, SLONG, ISC_STATUS);
+	void yyabandon(const Position& position, SLONG, const Firebird::Arg::StatusVector& status);
 
 	Firebird::MetaName optName(Firebird::MetaName* name)
 	{
@@ -254,7 +272,7 @@ private:
 		clause = value;
 	}
 
-	template <typename T, typename Delete>
+	template <typename T, template <typename C> class Delete>
 	void setClause(Firebird::AutoPtr<T, Delete>& clause, const char* duplicateMsg, T* value)
 	{
 		checkDuplicateClause(clause, duplicateMsg);

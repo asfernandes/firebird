@@ -59,7 +59,7 @@
 #define blr_blob_id     	(unsigned char)45	/* added from gds.h */
 #define blr_sql_date		(unsigned char)12
 #define blr_sql_time		(unsigned char)13
-#define blr_int64               (unsigned char)16
+#define blr_int64           (unsigned char)16
 #define blr_blob2			(unsigned char)17
 #define blr_domain_name		(unsigned char)18
 #define blr_domain_name2	(unsigned char)19
@@ -67,6 +67,9 @@
 #define blr_column_name		(unsigned char)21
 #define blr_column_name2	(unsigned char)22
 #define blr_bool			(unsigned char)23
+#define blr_dec64			(unsigned char)24
+#define blr_dec128			(unsigned char)25
+#define blr_dec_fixed		(unsigned char)26
 
 // first sub parameter for blr_domain_name[2]
 #define blr_domain_type_of	(unsigned char)0
@@ -126,8 +129,9 @@
 #define blr_maximum		(unsigned char)29
 #define blr_minimum		(unsigned char)30
 #define blr_total		(unsigned char)31
+#define blr_receive_batch	(unsigned char)32
 
-// unused codes: 32..33
+// unused code: 33
 
 #define blr_add			(unsigned char)34
 #define blr_subtract		(unsigned char)35
@@ -406,5 +410,21 @@
 #define blr_subfunc					(unsigned char) 208
 #define blr_record_version2			(unsigned char) 209
 #define blr_gen_id2					(unsigned char) 210 // NEXT VALUE FOR generator
+
+// FB 4.0 specific BLR
+
+#define blr_window_win				(unsigned char) 211
+
+// subcodes of blr_window_win
+#define blr_window_win_partition			(unsigned char) 1
+#define blr_window_win_order				(unsigned char) 2
+#define blr_window_win_map					(unsigned char) 3
+#define blr_window_win_extent_unit 			(unsigned char) 4
+#define blr_window_win_extent_frame_bound	(unsigned char) 5
+#define blr_window_win_extent_frame_value	(unsigned char) 6
+#define blr_window_win_exclusion			(unsigned char) 7
+
+#define blr_default					(unsigned char) 212
+#define blr_store3					(unsigned char) 213
 
 #endif // JRD_BLR_H

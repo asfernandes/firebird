@@ -26,6 +26,7 @@
 #include "../common/classes/objects_array.h"
 #include "../common/classes/NestConst.h"
 #include "../common/classes/QualifiedName.h"
+#include "../dsql/ExprNodes.h"
 #include "../jrd/jrd.h"
 #include "../jrd/exe.h"
 #include "../dsql/Visitors.h"
@@ -52,7 +53,7 @@ public:
 		: PermanentStorage(pool),
 		  unique(false),
 		  expressions(pool),
-		  descending(pool),
+		  direction(pool),
 		  nullOrder(pool)
 	{
 	}
@@ -70,11 +71,22 @@ public:
 	bool computable(CompilerScratch* csb, StreamType stream, bool allowOnlyCurrentStream);
 	void findDependentFromStreams(const OptimizerRetrieval* optRet, SortedStreamList* streamList);
 
+	NullsPlacement getEffectiveNullOrder(unsigned index) const
+	{
+		if (direction[index] == ORDER_ASC)
+			return (nullOrder[index] == NULLS_DEFAULT) ? NULLS_FIRST : nullOrder[index];
+		else if (direction[index] == ORDER_DESC)
+			return (nullOrder[index] == NULLS_DEFAULT) ? NULLS_LAST : nullOrder[index];
+
+		fb_assert(false);
+		return NULLS_DEFAULT;
+	}
+
 public:
-	bool unique;						// sorts using unique key - for distinct and group by
+	bool unique;						// sort uses unique key - for DISTINCT and GROUP BY
 	NestValueArray expressions;			// sort expressions
-	Firebird::Array<bool> descending;	// true = descending / false = ascending
-	Firebird::Array<int> nullOrder;		// rse_nulls_*
+	Firebird::Array<SortDirection> direction;	// rse_order_*
+	Firebird::Array<NullsPlacement> nullOrder;	// rse_nulls_*
 };
 
 class MapNode : public Firebird::PermanentStorage, public Printable
@@ -283,7 +295,7 @@ public:
 		return false;
 	}
 
-	virtual bool dsqlMatch(const ExprNode* other, bool ignoreMapCast) const;
+	virtual bool dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const;
 	virtual void genBlr(DsqlCompilerScratch* dsqlScratch);
 
 	virtual RelationSourceNode* copy(thread_db* tdbb, NodeCopier& copier) const;
@@ -346,6 +358,8 @@ public:
 		  targetList(NULL),
 		  in_msg(NULL),
 		  procedure(NULL),
+		  isSubRoutine(false),
+		  procedureId(0),
 		  view(NULL),
 		  context(0)
 	{
@@ -363,7 +377,7 @@ public:
 	virtual bool dsqlFieldFinder(FieldFinder& visitor);
 	virtual RecordSourceNode* dsqlFieldRemapper(FieldRemapper& visitor);
 
-	virtual bool dsqlMatch(const ExprNode* other, bool ignoreMapCast) const;
+	virtual bool dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const;
 	virtual void genBlr(DsqlCompilerScratch* dsqlScratch);
 
 	virtual ProcedureSourceNode* copy(thread_db* tdbb, NodeCopier& copier) const;
@@ -392,7 +406,7 @@ public:
 	virtual void findDependentFromStreams(const OptimizerRetrieval* optRet,
 		SortedStreamList* streamList);
 
-	virtual void collectStreams(SortedStreamList& streamList) const;
+	virtual void collectStreams(CompilerScratch* csb, SortedStreamList& streamList) const;
 
 	virtual RecordSource* compile(thread_db* tdbb, OptimizerBlk* opt, bool innerSubStream);
 
@@ -407,7 +421,27 @@ public:
 
 private:
 	NestConst<MessageNode> in_msg;
+
+	/***
+	dimitr: Referencing procedures via a pointer is not currently reliable, because
+			procedures can be removed from the metadata cache after ALTER/DROP.
+			Usually, this is prevented via the reference counting, but it's incremented
+			only for compiled requests. Node trees without requests (e.g. computed fields)
+			are not protected and may end with dead procedure pointers, causing problems
+			(up to crashing) when they're copied the next time. See CORE-5456 / CORE-5457.
+
+			ExecProcedureNode is a lucky exception because it's never (directly) used in
+			expressions. Sub-procedures are safe too. In other cases the procedure object
+			must be refetched from the metadata cache while copying the node.
+
+			A better (IMO) solution would be to add a second-level reference counting for
+			metadata objects since the parsing stage till either request creation or
+			explicit unload from the metadata cache. But we don't have clearly established
+			cache management policies yet, so I leave it for the other day.
+	***/
 	jrd_prc* procedure;
+	bool isSubRoutine;
+	USHORT procedureId;
 	jrd_rel* view;
 	SSHORT context;
 };
@@ -436,7 +470,7 @@ public:
 	virtual bool dsqlFieldFinder(FieldFinder& visitor);
 	virtual RecordSourceNode* dsqlFieldRemapper(FieldRemapper& visitor);
 
-	virtual bool dsqlMatch(const ExprNode* other, bool ignoreMapCast) const;
+	virtual bool dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const;
 	virtual void genBlr(DsqlCompilerScratch* dsqlScratch);
 
 	virtual AggregateSourceNode* copy(thread_db* tdbb, NodeCopier& copier) const;
@@ -460,7 +494,7 @@ public:
 	virtual RecordSource* compile(thread_db* tdbb, OptimizerBlk* opt, bool innerSubStream);
 
 private:
-	void genMap(DsqlCompilerScratch* dsqlScratch, dsql_map* map);
+	void genMap(DsqlCompilerScratch* dsqlScratch, UCHAR blrVerb, dsql_map* map);
 
 	RecordSource* generate(thread_db* tdbb, OptimizerBlk* opt, BoolExprNodeStack* parentStack,
 		StreamType shellStream);
@@ -543,10 +577,11 @@ private:
 class WindowSourceNode : public TypedNode<RecordSourceNode, RecordSourceNode::TYPE_WINDOW>
 {
 public:
-	struct Partition
+	struct Window
 	{
-		explicit Partition(MemoryPool&)
-			: stream(INVALID_STREAM)
+		explicit Window(MemoryPool&)
+			: stream(INVALID_STREAM),
+			  exclusion(WindowClause::Exclusion::NO_OTHERS)
 		{
 		}
 
@@ -555,19 +590,22 @@ public:
 		NestConst<SortNode> regroup;
 		NestConst<SortNode> order;
 		NestConst<MapNode> map;
+		NestConst<WindowClause::FrameExtent> frameExtent;
+		WindowClause::Exclusion exclusion;
 	};
 
 	explicit WindowSourceNode(MemoryPool& pool)
 		: TypedNode<RecordSourceNode, RecordSourceNode::TYPE_WINDOW>(pool),
 		  rse(NULL),
-		  partitions(pool)
+		  windows(pool)
 	{
 	}
 
 	static WindowSourceNode* parse(thread_db* tdbb, CompilerScratch* csb);
 
 private:
-	void parsePartitionBy(thread_db* tdbb, CompilerScratch* csb);
+	void parseLegacyPartitionBy(thread_db* tdbb, CompilerScratch* csb);
+	void parseWindow(thread_db* tdbb, CompilerScratch* csb);
 
 public:
 	virtual StreamType getStream() const
@@ -586,7 +624,7 @@ public:
 	virtual RecordSourceNode* pass2(thread_db* tdbb, CompilerScratch* csb);
 	virtual void pass2Rse(thread_db* tdbb, CompilerScratch* csb);
 	virtual bool containsStream(StreamType checkStream) const;
-	virtual void collectStreams(SortedStreamList& streamList) const;
+	virtual void collectStreams(CompilerScratch* csb, SortedStreamList& streamList) const;
 
 	virtual void computeDbKeyStreams(StreamList& /*streamList*/) const
 	{
@@ -602,7 +640,7 @@ public:
 
 private:
 	NestConst<RseNode> rse;
-	Firebird::ObjectsArray<Partition> partitions;
+	Firebird::ObjectsArray<Window> windows;
 };
 
 class RseNode : public TypedNode<RecordSourceNode, RecordSourceNode::TYPE_RSE>
@@ -626,6 +664,7 @@ public:
 		  dsqlJoinUsing(NULL),
 		  dsqlGroup(NULL),
 		  dsqlHaving(NULL),
+		  dsqlNamedWindows(NULL),
 		  dsqlOrder(NULL),
 		  dsqlStreams(NULL),
 		  dsqlExplicitJoin(false),
@@ -634,19 +673,11 @@ public:
 		  rse_relations(pool),
 		  flags(0)
 	{
-		addDsqlChildNode(dsqlStreams);
-		addDsqlChildNode(dsqlWhere);
-		addDsqlChildNode(dsqlJoinUsing);
-		addDsqlChildNode(dsqlOrder);
-		addDsqlChildNode(dsqlDistinct);
-		addDsqlChildNode(dsqlSelectList);
-		addDsqlChildNode(dsqlFirst);
-		addDsqlChildNode(dsqlSkip);
 	}
 
-	RseNode* clone()
+	RseNode* clone(MemoryPool& pool)
 	{
-		RseNode* obj = FB_NEW_POOL(getPool()) RseNode(getPool());
+		RseNode* obj = FB_NEW_POOL(pool) RseNode(pool);
 
 		obj->dsqlFirst = dsqlFirst;
 		obj->dsqlSkip = dsqlSkip;
@@ -657,6 +688,7 @@ public:
 		obj->dsqlJoinUsing = dsqlJoinUsing;
 		obj->dsqlGroup = dsqlGroup;
 		obj->dsqlHaving = dsqlHaving;
+		obj->dsqlNamedWindows = dsqlNamedWindows;
 		obj->dsqlOrder = dsqlOrder;
 		obj->dsqlStreams = dsqlStreams;
 		obj->dsqlContext = dsqlContext;
@@ -677,6 +709,23 @@ public:
 		return obj;
 	}
 
+	virtual void getChildren(NodeRefsHolder& holder, bool dsql) const
+	{
+		RecordSourceNode::getChildren(holder, dsql);
+
+		if (dsql)
+		{
+			holder.add(dsqlStreams);
+			holder.add(dsqlWhere);
+			holder.add(dsqlJoinUsing);
+			holder.add(dsqlOrder);
+			holder.add(dsqlDistinct);
+			holder.add(dsqlSelectList);
+			holder.add(dsqlFirst);
+			holder.add(dsqlSkip);
+		}
+	}
+
 	virtual Firebird::string internalPrint(NodePrinter& printer) const;
 	virtual bool dsqlAggregateFinder(AggregateFinder& visitor);
 	virtual bool dsqlAggregate2Finder(Aggregate2Finder& visitor);
@@ -685,7 +734,7 @@ public:
 	virtual bool dsqlFieldFinder(FieldFinder& visitor);
 	virtual RseNode* dsqlFieldRemapper(FieldRemapper& visitor);
 
-	virtual bool dsqlMatch(const ExprNode* other, bool ignoreMapCast) const;
+	virtual bool dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other, bool ignoreMapCast) const;
 	virtual RseNode* dsqlPass(DsqlCompilerScratch* dsqlScratch);
 
 	virtual RseNode* copy(thread_db* tdbb, NodeCopier& copier) const;
@@ -708,7 +757,7 @@ public:
 	virtual void findDependentFromStreams(const OptimizerRetrieval* optRet,
 		SortedStreamList* streamList);
 
-	virtual void collectStreams(SortedStreamList& streamList) const;
+	virtual void collectStreams(CompilerScratch* csb, SortedStreamList& streamList) const;
 
 	virtual RecordSource* compile(thread_db* tdbb, OptimizerBlk* opt, bool innerSubStream);
 
@@ -726,6 +775,7 @@ public:
 	NestConst<ValueListNode> dsqlJoinUsing;
 	NestConst<ValueListNode> dsqlGroup;
 	NestConst<BoolExprNode> dsqlHaving;
+	NamedWindowsClause* dsqlNamedWindows;
 	NestConst<ValueListNode> dsqlOrder;
 	NestConst<RecSourceListNode> dsqlStreams;
 	bool dsqlExplicitJoin;

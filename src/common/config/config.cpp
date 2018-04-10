@@ -69,12 +69,16 @@ public:
 		}
 	}
 
-/*	void changeDefaultConfig(Config* newConfig)
+	/***
+	It was a kind of getting ready for changing config remotely...
+
+	void changeDefaultConfig(Config* newConfig)
 	{
 		defaultConfig = newConfig;
 	}
- */
-	const Firebird::RefPtr<Config>& getDefaultConfig() const
+	***/
+
+	Firebird::RefPtr<const Config>& getDefaultConfig()
 	{
 		return defaultConfig;
 	}
@@ -92,7 +96,7 @@ public:
 	}
 
 private:
-	Firebird::RefPtr<Config> defaultConfig;
+	Firebird::RefPtr<const Config> defaultConfig;
 
     ConfigImpl(const ConfigImpl&);
     void operator=(const ConfigImpl&);
@@ -158,8 +162,8 @@ const Config::ConfigEntry Config::entries[MAX_CONFIG_KEY] =
 	{TYPE_STRING,		"RemoteBindAddress",		(ConfigValue) 0},
 	{TYPE_STRING,		"ExternalFileAccess",		(ConfigValue) "None"},	// location(s) of external files for tables
 	{TYPE_STRING,		"DatabaseAccess",			(ConfigValue) "Full"},	// location(s) of databases
-#define UDF_DEFAULT_CONFIG_VALUE "Restrict UDF"
-	{TYPE_STRING,		"UdfAccess",				(ConfigValue) UDF_DEFAULT_CONFIG_VALUE},	// location(s) of UDFs
+#define UDF_DEFAULT_RESTRICT_VALUE "Restrict UDF"								// use it to substitute FB_UDFDIR value
+	{TYPE_STRING,		"UdfAccess",				(ConfigValue) "None"},	// location(s) of UDFs
 	{TYPE_STRING,		"TempDirectories",			(ConfigValue) 0},
 #ifdef DEV_BUILD
  	{TYPE_BOOLEAN,		"BugcheckAbort",			(ConfigValue) true},	// whether to abort() engine when internal error is found
@@ -194,7 +198,20 @@ const Config::ConfigEntry Config::entries[MAX_CONFIG_KEY] =
 	{TYPE_BOOLEAN,		"IPv6V6Only",				(ConfigValue) false},
 	{TYPE_BOOLEAN,		"WireCompression",			(ConfigValue) false},
 	{TYPE_INTEGER,		"MaxIdentifierByteLength",	(ConfigValue) -1},
-	{TYPE_INTEGER,		"MaxIdentifierCharLength",	(ConfigValue) -1}
+	{TYPE_INTEGER,		"MaxIdentifierCharLength",	(ConfigValue) -1},
+	{TYPE_BOOLEAN,		"AllowEncryptedSecurityDatabase", (ConfigValue) false},
+	{TYPE_INTEGER,		"StatementTimeout",			(ConfigValue) 0},
+	{TYPE_INTEGER,		"ConnectionIdleTimeout",	(ConfigValue) 0},
+	{TYPE_INTEGER,		"ClientBatchBuffer",		(ConfigValue) (128 * 1024)},
+#ifdef DEV_BUILD
+	{TYPE_STRING,		"OutputRedirectionFile", 	(ConfigValue) "-"},
+#else
+#ifdef WIN_NT
+	{TYPE_STRING,		"OutputRedirectionFile", 	(ConfigValue) "nul"},
+#else
+	{TYPE_STRING,		"OutputRedirectionFile", 	(ConfigValue) "/dev/null"}
+#endif
+#endif
 };
 
 /******************************************************************************
@@ -256,7 +273,7 @@ Config::Config(const ConfigFile& file, const Config& base, const Firebird::PathN
 	notifyDatabase = notify;
 }
 
-void Config::notify()
+void Config::notify() const
 {
 	if (!notifyDatabase.hasData())
 		return;
@@ -264,7 +281,7 @@ void Config::notify()
 		notifyDatabase.erase();
 }
 
-void Config::merge(Firebird::RefPtr<Config>& config, const Firebird::string* dpbConfig)
+void Config::merge(Firebird::RefPtr<const Config>& config, const Firebird::string* dpbConfig)
 {
 	if (dpbConfig && dpbConfig->hasData())
 	{
@@ -338,7 +355,7 @@ Config::~Config()
  *	Public interface
  */
 
-const Firebird::RefPtr<Config>& Config::getDefaultConfig()
+const Firebird::RefPtr<const Config>& Config::getDefaultConfig()
 {
 	return firebirdConf().getDefaultConfig();
 }
@@ -420,9 +437,9 @@ int Config::getTempBlockSize()
 	return (int) getDefaultConfig()->values[KEY_TEMP_BLOCK_SIZE];
 }
 
-FB_UINT64 Config::getTempCacheLimit()
+FB_UINT64 Config::getTempCacheLimit() const
 {
-	SINT64 v = (SINT64) getDefaultConfig()->values[KEY_TEMP_CACHE_LIMIT];
+	SINT64 v = get<SINT64>(KEY_TEMP_CACHE_LIMIT);
 	if (v < 0)
 	{
 		v = getServerMode() != MODE_SUPER ? 8388608 : 67108864;	// bytes
@@ -587,8 +604,8 @@ const char *Config::getUdfAccess()
 	}
 
 	const char* v = (const char*) getDefaultConfig()->values[KEY_UDF_ACCESS];
-	if (CASE_SENSITIVITY ? (! strcmp(v, UDF_DEFAULT_CONFIG_VALUE) && FB_UDFDIR[0]) :
-						   (! fb_utils::stricmp(v, UDF_DEFAULT_CONFIG_VALUE) && FB_UDFDIR[0]))
+	if (CASE_SENSITIVITY ? (! strcmp(v, UDF_DEFAULT_RESTRICT_VALUE) && FB_UDFDIR[0]) :
+						   (! fb_utils::stricmp(v, UDF_DEFAULT_RESTRICT_VALUE) && FB_UDFDIR[0]))
 	{
 		udfValue->printf("Restrict %s", FB_UDFDIR);
 		value = udfValue->c_str();
@@ -809,4 +826,30 @@ int Config::getMaxIdentifierCharLength() const
 		rc = METADATA_IDENTIFIER_CHAR_LEN;
 
 	return MIN(MAX(rc, 1), METADATA_IDENTIFIER_CHAR_LEN);
+}
+
+bool Config::getCryptSecurityDatabase() const
+{
+	return get<bool>(KEY_ENCRYPT_SECURITY_DATABASE);
+}
+
+unsigned int Config::getStatementTimeout() const
+{
+	return get<unsigned int>(KEY_STMT_TIMEOUT);
+}
+
+unsigned int Config::getConnIdleTimeout() const
+{
+	return get<unsigned int>(KEY_CONN_IDLE_TIMEOUT);
+}
+
+unsigned int Config::getClientBatchBuffer() const
+{
+	return get<unsigned int>(KEY_CLIENT_BATCH_BUFFER);
+}
+
+const char* Config::getOutputRedirectionFile()
+{
+	const char* file = (const char*) (getDefaultConfig()->values[KEY_OUTPUT_REDIRECTION_FILE]);
+	return file;
 }

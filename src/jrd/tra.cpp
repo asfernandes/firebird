@@ -61,6 +61,7 @@
 #include "../jrd/tra_proto.h"
 #include "../jrd/vio_proto.h"
 #include "../jrd/jrd_proto.h"
+#include "../jrd/scl_proto.h"
 #include "../common/classes/ClumpletWriter.h"
 #include "../common/classes/TriState.h"
 #include "../common/utils_proto.h"
@@ -74,6 +75,7 @@
 #include "../jrd/Collation.h"
 #include "../jrd/Mapping.h"
 #include "../jrd/DbCreators.h"
+#include "../common/os/fbsyslog.h"
 
 
 const int DYN_MSG_FAC	= 8;
@@ -88,7 +90,7 @@ typedef Firebird::GenericMap<Firebird::Pair<Firebird::NonPooled<USHORT, UCHAR> >
 #ifdef SUPERSERVER_V2
 static TraNumber bump_transaction_id(thread_db*, WIN*);
 #else
-static header_page* bump_transaction_id(thread_db*, WIN*);
+static header_page* bump_transaction_id(thread_db*, WIN*, bool);
 #endif
 static void retain_context(thread_db* tdbb, jrd_tra* transaction, bool commit, int state);
 static void expand_view_lock(thread_db* tdbb, jrd_tra*, jrd_rel*, UCHAR lock_type,
@@ -97,7 +99,6 @@ static tx_inv_page* fetch_inventory_page(thread_db*, WIN* window, ULONG sequence
 static const char* get_lockname_v3(const UCHAR lock);
 static ULONG inventory_page(thread_db*, ULONG);
 static int limbo_transaction(thread_db*, TraNumber id);
-static void link_transaction(thread_db*, jrd_tra*);
 static void restart_requests(thread_db*, jrd_tra*);
 static void start_sweeper(thread_db*);
 static THREAD_ENTRY_DECLARE sweep_database(THREAD_ENTRY_PARAM);
@@ -143,7 +144,13 @@ void TRA_attach_request(Jrd::jrd_tra* transaction, Jrd::jrd_req* request)
 void TRA_detach_request(Jrd::jrd_req* request)
 {
 	if (!request->req_transaction)
+	{
+		fb_assert(!request->req_savepoints);
 		return;
+	}
+
+	// Release stored looper savepoints
+	Savepoint::destroy(request->req_savepoints);
 
 	// Remove request from the doubly linked list
 	if (request->req_tra_next)
@@ -248,7 +255,7 @@ void TRA_cleanup(thread_db* tdbb)
 		window.win_page = inventory_page(tdbb, sequence);
 		tx_inv_page* tip = (tx_inv_page*) CCH_FETCH(tdbb, &window, LCK_write, pag_transactions);
 		TraNumber max = ceiling - (TraNumber) sequence * trans_per_tip;
-		if (max > trans_per_tip)
+		if (max >= trans_per_tip)
 			max = trans_per_tip - 1;
 		for (; number <= max; number++)
 		{
@@ -385,7 +392,7 @@ void TRA_commit(thread_db* tdbb, jrd_tra* transaction, const bool retaining_flag
 			status_exception::raise(&st);
 
 		secContext->tra = NULL;
-		clearMappingCache(tdbb->getDatabase()->dbb_config->getSecurityDatabase(), MAPPING_CACHE);
+		Mapping::clearCache(tdbb->getDatabase()->dbb_config->getSecurityDatabase(), Mapping::MAPPING_CACHE);
 
 		transaction->eraseSecDbContext();
 	}
@@ -819,20 +826,31 @@ void TRA_update_counters(thread_db* tdbb, Database* dbb)
 	WIN window(HEADER_PAGE_NUMBER);
 	header_page* header = (header_page*)CCH_FETCH(tdbb, &window, LCK_write, pag_header);
 
-	if (dbb->dbb_oldest_active > header->hdr_oldest_active ||
-		dbb->dbb_oldest_transaction > header->hdr_oldest_transaction ||
-		dbb->dbb_oldest_snapshot > header->hdr_oldest_snapshot)
+	const TraNumber next_transaction = Ods::getNT(header);
+	const TraNumber oldest_transaction = Ods::getOIT(header);
+	const TraNumber oldest_active = Ods::getOAT(header);
+	const TraNumber oldest_snapshot = Ods::getOST(header);
+
+	fb_assert(dbb->dbb_next_transaction <= next_transaction);
+
+	if (dbb->dbb_oldest_active > oldest_active ||
+		dbb->dbb_oldest_transaction > oldest_transaction ||
+		dbb->dbb_oldest_snapshot > oldest_snapshot ||
+		dbb->dbb_next_transaction > next_transaction)
 	{
 		CCH_MARK_MUST_WRITE(tdbb, &window);
 
 		if (dbb->dbb_oldest_active > header->hdr_oldest_active)
-			header->hdr_oldest_active = dbb->dbb_oldest_active;
+			Ods::writeOAT(header, dbb->dbb_oldest_active);
 
 		if (dbb->dbb_oldest_transaction > header->hdr_oldest_transaction)
-			header->hdr_oldest_transaction = dbb->dbb_oldest_transaction;
+			Ods::writeOIT(header, dbb->dbb_oldest_transaction);
 
 		if (dbb->dbb_oldest_snapshot > header->hdr_oldest_snapshot)
-			header->hdr_oldest_snapshot = dbb->dbb_oldest_snapshot;
+			Ods::writeOST(header, dbb->dbb_oldest_snapshot);
+
+		if (dbb->dbb_next_transaction > next_transaction)
+			Ods::writeNT(header, dbb->dbb_next_transaction);
 	}
 
 	CCH_RELEASE(tdbb, &window);
@@ -1133,7 +1151,7 @@ jrd_tra* TRA_reconnect(thread_db* tdbb, const UCHAR* id, USHORT length)
 	trans->tra_number = number;
 	trans->tra_flags |= TRA_prepared | TRA_reconnected | TRA_write;
 
-	link_transaction(tdbb, trans);
+	trans->linkToAttachment(attachment);
 
 	return trans;
 }
@@ -1229,6 +1247,9 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 
 	// Release the locks associated with the transaction
 
+	if (transaction->tra_alter_db_lock)
+		LCK_release(tdbb, transaction->tra_alter_db_lock);
+
 	vec<Lock*>* vector = transaction->tra_relation_locks;
 	if (vector)
 	{
@@ -1257,14 +1278,7 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 
 	// Unlink the transaction from the attachment block
 
-	for (jrd_tra** ptr = &attachment->att_transactions; *ptr; ptr = &(*ptr)->tra_next)
-	{
-		if (*ptr == transaction)
-		{
-			*ptr = transaction->tra_next;
-			break;
-		}
-	}
+	transaction->unlinkFromAttachment();
 
 	// Release transaction's under-modification-rpb list
 
@@ -1282,7 +1296,7 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 	// Release the transaction and its pool
 
 	tdbb->setTransaction(NULL);
-	JTransaction* jTra = transaction->getInterface();
+	JTransaction* jTra = transaction->getInterface(true);	// ASF: maybe it's better to pass false?
 	if (jTra)
 	{
 		jTra->setHandle(NULL);
@@ -1438,16 +1452,25 @@ void TRA_set_state(thread_db* tdbb, jrd_tra* transaction, TraNumber number, int 
 	WIN window(DB_PAGE_SPACE, -1);
 	tx_inv_page* tip = fetch_inventory_page(tdbb, &window, sequence, LCK_write);
 
+	UCHAR* address = tip->tip_transactions + byte;
+	const int old_state = ((*address) >> shift) & TRA_MASK;
+
 #ifdef SUPERSERVER_V2
 	CCH_MARK(tdbb, &window);
 	const ULONG generation = tip->tip_header.pag_generation;
 #else
-	CCH_MARK_MUST_WRITE(tdbb, &window);
+	if (!(dbb->dbb_flags & DBB_shared) || !transaction  ||
+		(transaction->tra_flags & TRA_write) ||
+		old_state != tra_active || state != tra_committed)
+	{
+		CCH_MARK_MUST_WRITE(tdbb, &window);
+	}
+	else
+		CCH_MARK(tdbb, &window);
 #endif
 
 	// set the state on the TIP page
 
-	UCHAR* address = tip->tip_transactions + byte;
 	*address &= ~(TRA_MASK << shift);
 	*address |= state << shift;
 
@@ -1710,84 +1733,87 @@ void TRA_sweep(thread_db* tdbb)
 
 	try {
 
-	// Identify ourselves as a sweeper thread. This accomplishes two goals:
-	// 1) Sweep transaction is started "precommitted" and
-	// 2) Execution is throttled in JRD_reschedule() by
-	// yielding the processor when our quantum expires.
+		// Identify ourselves as a sweeper thread. This accomplishes two goals:
+		// 1) Sweep transaction is started "precommitted" and
+		// 2) Execution is throttled in JRD_reschedule() by
+		// yielding the processor when our quantum expires.
 
-	tdbb->tdbb_flags |= TDBB_sweeper;
+		tdbb->tdbb_flags |= TDBB_sweeper;
 
-	TraceSweepEvent traceSweep(tdbb);
+		TraceSweepEvent traceSweep(tdbb);
 
-	// Start a transaction, if necessary, to perform the sweep.
-	// Save the transaction's oldest snapshot as it is refreshed
-	// during the course of the database sweep. Since it is used
-	// below to advance the OIT we must save it before it changes.
+		// Start a transaction, if necessary, to perform the sweep.
+		// Save the transaction's oldest snapshot as it is refreshed
+		// during the course of the database sweep. Since it is used
+		// below to advance the OIT we must save it before it changes.
 
-	transaction = TRA_start(tdbb, sizeof(sweep_tpb), sweep_tpb);
+		transaction = TRA_start(tdbb, sizeof(sweep_tpb), sweep_tpb);
 
-	TraNumber transaction_oldest_active = transaction->tra_oldest_active;
-	tdbb->setTransaction(transaction);
+		TraNumber transaction_oldest_active = transaction->tra_oldest_active;
+		tdbb->setTransaction(transaction);
 
-	// The garbage collector runs asynchronously with respect to
-	// our database sweep. This isn't good enough since we must
-	// be absolutely certain that all dead transactions have been
-	// swept from the database before advancing the OIT. Turn off
-	// the "notify garbage collector" flag for the attachment and
-	// synchronously perform the garbage collection ourselves.
+		// The garbage collector runs asynchronously with respect to
+		// our database sweep. This isn't good enough since we must
+		// be absolutely certain that all dead transactions have been
+		// swept from the database before advancing the OIT. Turn off
+		// the "notify garbage collector" flag for the attachment and
+		// synchronously perform the garbage collection ourselves.
 
-	attachment->att_flags &= ~ATT_notify_gc;
+		attachment->att_flags &= ~ATT_notify_gc;
 
-	if (VIO_sweep(tdbb, transaction, &traceSweep))
-	{
-		// At this point, we know that no record versions belonging to dead
-		// transactions remain anymore. However, there may still be limbo
-		// transactions, so we need to find the oldest one between tra_oldest and tra_top.
-		// As our transaction is read-committed (see sweep_tpb), we have to scan
-		// the global TIP cache.
-
-		int oldest_state = 0;
-		const TraNumber oldest_limbo =
-			TPC_find_states(tdbb, transaction->tra_oldest, transaction->tra_top - 1,
-							1 << tra_limbo, oldest_state);
-
-		const TraNumber active = oldest_limbo ? oldest_limbo : transaction->tra_top;
-
-		// Flush page buffers to insure that no dangling records from
-		// dead transactions are left on-disk. This must be done before
-		// the OIT is advanced and the header page is written to disk.
-		// If the header page was written before flushing the page buffers
-		// and there was a server crash, the dead records would appear
-		// committed since their TID would now be less than the OIT recorded
-		// in the database.
-
-		CCH_flush(tdbb, FLUSH_SWEEP, 0);
-
-		WIN window(HEADER_PAGE_NUMBER);
-		header_page* const header = (header_page*) CCH_FETCH(tdbb, &window, LCK_write, pag_header);
-
-		if (Ods::getOIT(header) < --transaction_oldest_active)
+		if (VIO_sweep(tdbb, transaction, &traceSweep))
 		{
-			CCH_MARK_MUST_WRITE(tdbb, &window);
-			Ods::writeOIT(header, MIN(active, transaction_oldest_active));
+			// At this point, we know that no record versions belonging to dead
+			// transactions remain anymore. However, there may still be limbo
+			// transactions, so we need to find the oldest one between tra_oldest and tra_top.
+			// As our transaction is read-committed (see sweep_tpb), we have to scan
+			// the global TIP cache.
+
+			int oldest_state = 0;
+			const TraNumber oldest_limbo =
+				TPC_find_states(tdbb, transaction->tra_oldest, transaction->tra_top - 1,
+								1 << tra_limbo, oldest_state);
+
+			const TraNumber active = oldest_limbo ? oldest_limbo : transaction->tra_top;
+
+			// Flush page buffers to insure that no dangling records from
+			// dead transactions are left on-disk. This must be done before
+			// the OIT is advanced and the header page is written to disk.
+			// If the header page was written before flushing the page buffers
+			// and there was a server crash, the dead records would appear
+			// committed since their TID would now be less than the OIT recorded
+			// in the database.
+
+			CCH_flush(tdbb, FLUSH_SWEEP, 0);
+
+			WIN window(HEADER_PAGE_NUMBER);
+			header_page* const header = (header_page*) CCH_FETCH(tdbb, &window, LCK_write, pag_header);
+
+			if (Ods::getOIT(header) < --transaction_oldest_active)
+			{
+				CCH_MARK_MUST_WRITE(tdbb, &window);
+				Ods::writeOIT(header, MIN(active, transaction_oldest_active));
+			}
+
+			traceSweep.update(header);
+
+			CCH_RELEASE(tdbb, &window);
+
+			traceSweep.finish();
 		}
 
-		traceSweep.update(header);
+		TRA_commit(tdbb, transaction, false);
 
-		CCH_RELEASE(tdbb, &window);
-
-		traceSweep.finish();
+		tdbb->tdbb_flags &= ~TDBB_sweeper;
+		tdbb->setTransaction(tdbb_old_trans);
+		dbb->clearSweepFlags(tdbb);
 	}
-
-	TRA_commit(tdbb, transaction, false);
-
-	tdbb->tdbb_flags &= ~TDBB_sweeper;
-	tdbb->setTransaction(tdbb_old_trans);
-	dbb->clearSweepFlags(tdbb);
-	}	// try
 	catch (const Firebird::Exception& ex)
 	{
-		iscLogException("Error during sweep:", ex);
+		PathName message = "Error during sweep of ";
+		message += dbb->dbb_database_name;
+		message += ':';
+		iscLogException(message.c_str(), ex);
 
 		ex.stuffException(tdbb->tdbb_status_vector);
 
@@ -1937,7 +1963,7 @@ static TraNumber bump_transaction_id(thread_db* tdbb, WIN* window)
 #else
 
 
-static header_page* bump_transaction_id(thread_db* tdbb, WIN* window)
+static header_page* bump_transaction_id(thread_db* tdbb, WIN* window, bool dontWrite)
 {
 /**************************************
  *
@@ -1992,7 +2018,11 @@ static header_page* bump_transaction_id(thread_db* tdbb, WIN* window)
 
 	// Extend, if necessary, has apparently succeeded.  Next, update header page
 
-	CCH_MARK_MUST_WRITE(tdbb, window);
+	if (dontWrite && !new_tip)
+		CCH_MARK(tdbb, window);
+	else
+		CCH_MARK_MUST_WRITE(tdbb, window);
+
 	dbb->dbb_next_transaction = number;
 
 	Ods::writeNT(header, number);
@@ -2287,7 +2317,22 @@ static int limbo_transaction(thread_db* tdbb, TraNumber id)
 }
 
 
-static void link_transaction(thread_db* tdbb, jrd_tra* transaction)
+void jrd_tra::unlinkFromAttachment()
+{
+	for (jrd_tra** ptr = &tra_attachment->att_transactions; *ptr; ptr = &(*ptr)->tra_next)
+	{
+		if (*ptr == this)
+		{
+			*ptr = tra_next;
+			return;
+		}
+	}
+
+	tra_abort("transaction to unlink is missing in the attachment");
+}
+
+
+void jrd_tra::linkToAttachment(Attachment* attachment)
 {
 /**************************************
  *
@@ -2299,11 +2344,20 @@ static void link_transaction(thread_db* tdbb, jrd_tra* transaction)
  *	Link transaction block into database attachment.
  *
  **************************************/
-	SET_TDBB(tdbb);
+	tra_next = attachment->att_transactions;
+	attachment->att_transactions = this;
+}
 
-	Jrd::Attachment* attachment = tdbb->getAttachment();
-	transaction->tra_next = attachment->att_transactions;
-	attachment->att_transactions = transaction;
+
+void jrd_tra::tra_abort(const char* reason)
+{
+	string buff;
+	buff.printf("Failure working with transactions list: %s", reason);
+	Syslog::Record(Syslog::Error, buff.c_str());
+	gds__log(buff.c_str());
+#ifdef DEV_BUILD
+	abort();
+#endif
 }
 
 
@@ -2384,7 +2438,10 @@ static void retain_context(thread_db* tdbb, jrd_tra* transaction, bool commit, i
 		new_number = dbb->dbb_next_transaction + dbb->generateTransactionId(tdbb);
 	else
 	{
-		const header_page* const header = bump_transaction_id(tdbb, &window);
+		const bool dontWrite = (dbb->dbb_flags & DBB_shared) &&
+			(transaction->tra_flags & TRA_readonly);
+
+		const header_page* const header = bump_transaction_id(tdbb, &window, dontWrite);
 		new_number = Ods::getNT(header);
 	}
 #endif
@@ -3070,7 +3127,10 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	}
 	else
 	{
-		const header_page* header = bump_transaction_id(tdbb, &window);
+		const bool dontWrite = (dbb->dbb_flags & DBB_shared) &&
+			(trans->tra_flags & TRA_readonly);
+
+		const header_page* header = bump_transaction_id(tdbb, &window, dontWrite);
 		number = Ods::getNT(header);
 		oldest = Ods::getOIT(header);
 		oldest_active = Ods::getOAT(header);
@@ -3090,7 +3150,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// of four, which puts the transaction on a byte boundary.
 
 	TraNumber base = oldest & ~TRA_MASK;
-	const ULONG top = (dbb->dbb_flags & DBB_read_only) ?
+	const TraNumber top = (dbb->dbb_flags & DBB_read_only) ?
 		dbb->dbb_next_transaction : number;
 
 	if (!(trans->tra_flags & TRA_read_committed) && (top >= oldest))
@@ -3129,230 +3189,238 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 	// Link the transaction to the attachment block before releasing
 	// header page for handling signals.
 
-	link_transaction(tdbb, trans);
+	trans->linkToAttachment(attachment);
 
+	try
+	{
 #ifndef SUPERSERVER_V2
-	if (!dbb->readOnly())
-		CCH_RELEASE(tdbb, &window);
+		if (!dbb->readOnly())
+			CCH_RELEASE(tdbb, &window);
 #endif
 
-	if (dbb->readOnly())
-	{
-		// Set transaction flags to TRA_precommitted, TRA_readonly
-		trans->tra_flags |= (TRA_readonly | TRA_precommitted);
-	}
+		if (dbb->readOnly())
+		{
+			// Set transaction flags to TRA_precommitted, TRA_readonly
+			trans->tra_flags |= (TRA_readonly | TRA_precommitted);
+		}
 
-	// Next, take a snapshot of all transactions between the oldest interesting
-	// transaction and the current.  Don't bother to get a snapshot for
-	// read-committed transactions; they use the snapshot off the dbb block
-	// since they need to know what is currently committed.
+		// Next, take a snapshot of all transactions between the oldest interesting
+		// transaction and the current.  Don't bother to get a snapshot for
+		// read-committed transactions; they use the snapshot off the dbb block
+		// since they need to know what is currently committed.
 
-	if (trans->tra_flags & TRA_read_committed)
-		TPC_initialize_tpc(tdbb, top);
-	else if (top > base)
-		TRA_get_inventory(tdbb, trans->tra_transactions.begin(), base, top);
-
-	// Next task is to find the oldest active transaction on the system.  This
-	// is needed for garbage collection.  Things are made ever so slightly
-	// more complicated by the fact that existing transaction may have oldest
-	// actives older than they are.
-
-	Lock temp_lock(tdbb, sizeof(TraNumber), LCK_tra, trans);
-
-	trans->tra_oldest_active = number;
-	base = oldest & ~TRA_MASK;
-	oldest_active = number;
-	bool cleanup = !(number % TRA_ACTIVE_CLEANUP);
-	int oldest_state;
-
-	for (; active < top; active++)
-	{
 		if (trans->tra_flags & TRA_read_committed)
-		{
-			const ULONG mask = (1 << tra_active);
-			active = TPC_find_states(tdbb, active, top, mask, oldest_state);
-			if (!active)
-			{
-				active = number;
-				break;
-			}
-			fb_assert(oldest_state == tra_active);
-		}
-		else
-		{
-			const ULONG byte = TRANS_OFFSET(active - base);
-			const USHORT shift = TRANS_SHIFT(active);
-			oldest_state = (trans->tra_transactions[byte] >> shift) & TRA_MASK;
-		}
+			TPC_initialize_tpc(tdbb, top);
+		else if (top > base)
+			TRA_get_inventory(tdbb, trans->tra_transactions.begin(), base, top);
 
-		if (oldest_state == tra_active)
+		// Next task is to find the oldest active transaction on the system.  This
+		// is needed for garbage collection.  Things are made ever so slightly
+		// more complicated by the fact that existing transaction may have oldest
+		// actives older than they are.
+
+		Lock temp_lock(tdbb, sizeof(TraNumber), LCK_tra, trans);
+
+		trans->tra_oldest_active = number;
+		base = oldest & ~TRA_MASK;
+		oldest_active = number;
+		bool cleanup = !(number % TRA_ACTIVE_CLEANUP);
+		int oldest_state;
+
+		for (; active < top; active++)
 		{
-			temp_lock.setKey(active);
-			TraNumber data = LCK_read_data(tdbb, &temp_lock);
-			if (!data)
+			if (trans->tra_flags & TRA_read_committed)
 			{
-				if (cleanup)
+				const ULONG mask = (1 << tra_active);
+				active = TPC_find_states(tdbb, active, top, mask, oldest_state);
+				if (!active)
 				{
-					if (TRA_wait(tdbb, trans, active, jrd_tra::tra_no_wait) == tra_committed)
-						cleanup = false;
-					continue;
+					active = number;
+					break;
+				}
+				fb_assert(oldest_state == tra_active);
+			}
+			else
+			{
+				const ULONG byte = TRANS_OFFSET(active - base);
+				const USHORT shift = TRANS_SHIFT(active);
+				oldest_state = (trans->tra_transactions[byte] >> shift) & TRA_MASK;
+			}
+
+			if (oldest_state == tra_active)
+			{
+				temp_lock.setKey(active);
+				TraNumber data = LCK_read_data(tdbb, &temp_lock);
+				if (!data)
+				{
+					if (cleanup)
+					{
+						if (TRA_wait(tdbb, trans, active, jrd_tra::tra_no_wait) == tra_committed)
+							cleanup = false;
+						continue;
+					}
+
+					data = active;
 				}
 
-				data = active;
-			}
+				oldest_active = MIN(oldest_active, active);
 
-			oldest_active = MIN(oldest_active, active);
+				// Find the oldest record version that cannot be garbage collected yet
+				// by taking the minimum of all all versions needed by all active transactions.
 
-			// Find the oldest record version that cannot be garbage collected yet
-			// by taking the minimum of all all versions needed by all active transactions.
+				if (data < trans->tra_oldest_active)
+					trans->tra_oldest_active = data;
 
-			if (data < trans->tra_oldest_active)
-				trans->tra_oldest_active = data;
+				// If the lock data for any active transaction matches a previously
+				// computed value then there is no need to continue. There can't be
+				// an older lock data in the remaining active transactions.
 
-			// If the lock data for any active transaction matches a previously
-			// computed value then there is no need to continue. There can't be
-			// an older lock data in the remaining active transactions.
+				if (trans->tra_oldest_active == oldest_snapshot)
+					break;
 
-			if (trans->tra_oldest_active == oldest_snapshot)
+				// Query the minimum lock data for all active transaction locks.
+				// This will be the oldest active snapshot used for regulating garbage collection.
+
+				data = LCK_query_data(tdbb, LCK_tra, LCK_MIN);
+				if (data && data < trans->tra_oldest_active)
+					trans->tra_oldest_active = data;
 				break;
-
-			// Query the minimum lock data for all active transaction locks.
-			// This will be the oldest active snapshot used for regulating garbage collection.
-
-			data = LCK_query_data(tdbb, LCK_tra, LCK_MIN);
-			if (data && data < trans->tra_oldest_active)
-				trans->tra_oldest_active = data;
-			break;
+			}
 		}
-	}
 
-	// Calculate attachment-local oldest active and oldest snapshot numbers
-	// looking at current attachment's transactions only. Calculated values
-	// are used to determine garbage collection threshold for attachment-local
-	// data such as temporary tables (GTT's).
+		// Calculate attachment-local oldest active and oldest snapshot numbers
+		// looking at current attachment's transactions only. Calculated values
+		// are used to determine garbage collection threshold for attachment-local
+		// data such as temporary tables (GTT's).
 
-	trans->tra_att_oldest_active = number;
-	TraNumber att_oldest_active = number;
-	TraNumber att_oldest_snapshot = number;
+		trans->tra_att_oldest_active = number;
+		TraNumber att_oldest_active = number;
+		TraNumber att_oldest_snapshot = number;
 
-	for (jrd_tra* tx_att = attachment->att_transactions; tx_att; tx_att = tx_att->tra_next)
-	{
-		att_oldest_active = MIN(att_oldest_active, tx_att->tra_number);
-		att_oldest_snapshot = MIN(att_oldest_snapshot, tx_att->tra_att_oldest_active);
-	}
-
-	trans->tra_att_oldest_active = (trans->tra_flags & TRA_read_committed) ? number : att_oldest_active;
-
-	if (attachment->att_oldest_snapshot < att_oldest_snapshot)
-		attachment->att_oldest_snapshot = att_oldest_snapshot;
-
-	// Put the TID of the oldest active transaction (just calculated)
-	// in the new transaction's lock.
-	// hvlad: for read-committed transaction put tra_number to prevent
-	// unnecessary blocking of garbage collection by read-committed
-	// transactions
-
-	const TraNumber lck_data = (trans->tra_flags & TRA_read_committed) ? number : oldest_active;
-
-	//fb_assert(sizeof(lock->lck_data) == sizeof(lck_data));
-	if (lock->lck_data != (SLONG) lck_data)
-		LCK_write_data(tdbb, lock, lck_data);
-
-	// Finally, scan transactions looking for the oldest interesting transaction -- the oldest
-	// non-commited transaction.  This will not be updated immediately, but saved until the
-	// next update access to the header page
-
-	oldest_state = tra_committed;
-
-	for (oldest = trans->tra_oldest; oldest < top; oldest++)
-	{
-		if (trans->tra_flags & TRA_read_committed)
+		for (jrd_tra* tx_att = attachment->att_transactions; tx_att; tx_att = tx_att->tra_next)
 		{
-			const ULONG mask = ~((1 << tra_committed) | (1 << tra_precommitted));
-			oldest = TPC_find_states(tdbb, trans->tra_oldest, top, mask, oldest_state);
-			if (!oldest)
+			att_oldest_active = MIN(att_oldest_active, tx_att->tra_number);
+			att_oldest_snapshot = MIN(att_oldest_snapshot, tx_att->tra_att_oldest_active);
+		}
+
+		trans->tra_att_oldest_active = (trans->tra_flags & TRA_read_committed) ? number : att_oldest_active;
+
+		if (attachment->att_oldest_snapshot < att_oldest_snapshot)
+			attachment->att_oldest_snapshot = att_oldest_snapshot;
+
+		// Put the TID of the oldest active transaction (just calculated)
+		// in the new transaction's lock.
+		// hvlad: for read-committed transaction put tra_number to prevent
+		// unnecessary blocking of garbage collection by read-committed
+		// transactions
+
+		const TraNumber lck_data = (trans->tra_flags & TRA_read_committed) ? number : oldest_active;
+
+		//fb_assert(sizeof(lock->lck_data) == sizeof(lck_data));
+		if (lock->lck_data != (SLONG) lck_data)
+			LCK_write_data(tdbb, lock, lck_data);
+
+		// Finally, scan transactions looking for the oldest interesting transaction -- the oldest
+		// non-commited transaction.  This will not be updated immediately, but saved until the
+		// next update access to the header page
+
+		oldest_state = tra_committed;
+
+		for (oldest = trans->tra_oldest; oldest < top; oldest++)
+		{
+			if (trans->tra_flags & TRA_read_committed)
 			{
-				oldest = top;
-				break;
+				const ULONG mask = ~((1 << tra_committed) | (1 << tra_precommitted));
+				oldest = TPC_find_states(tdbb, trans->tra_oldest, top, mask, oldest_state);
+				if (!oldest)
+				{
+					oldest = top;
+					break;
+				}
+				fb_assert(oldest_state != tra_committed && oldest_state != tra_precommitted);
 			}
-			fb_assert(oldest_state != tra_committed && oldest_state != tra_precommitted);
+			else
+			{
+				const ULONG byte = TRANS_OFFSET(oldest - base);
+				const USHORT shift = TRANS_SHIFT(oldest);
+				oldest_state = (trans->tra_transactions[byte] >> shift) & TRA_MASK;
+			}
+
+			if (oldest_state != tra_committed && oldest_state != tra_precommitted)
+				break;
 		}
-		else
+
+		if (oldest >= top && dbb->dbb_flags & DBB_read_only)
+			oldest = number;
+
+		if (--oldest > dbb->dbb_oldest_transaction)
+			dbb->dbb_oldest_transaction = oldest;
+
+		if (oldest_active > dbb->dbb_oldest_active)
+			dbb->dbb_oldest_active = oldest_active;
+
+		if (trans->tra_oldest_active > dbb->dbb_oldest_snapshot)
 		{
-			const ULONG byte = TRANS_OFFSET(oldest - base);
-			const USHORT shift = TRANS_SHIFT(oldest);
-			oldest_state = (trans->tra_transactions[byte] >> shift) & TRA_MASK;
+			dbb->dbb_oldest_snapshot = trans->tra_oldest_active;
+
+			if (!(dbb->dbb_flags & DBB_gc_active) && (dbb->dbb_flags & DBB_gc_background))
+			{
+				dbb->dbb_flags |= DBB_gc_pending;
+				dbb->dbb_gc_sem.release();
+			}
 		}
 
-		if (oldest_state != tra_committed && oldest_state != tra_precommitted)
-			break;
-	}
+		// If the transaction block is getting out of hand, force a sweep
 
-	if (oldest >= top && dbb->dbb_flags & DBB_read_only)
-		oldest = number;
-
-	if (--oldest > (ULONG) dbb->dbb_oldest_transaction)
-		dbb->dbb_oldest_transaction = oldest;
-
-	if (oldest_active > dbb->dbb_oldest_active)
-		dbb->dbb_oldest_active = oldest_active;
-
-	if (trans->tra_oldest_active > dbb->dbb_oldest_snapshot)
-	{
-		dbb->dbb_oldest_snapshot = trans->tra_oldest_active;
-
-		if (!(dbb->dbb_flags & DBB_gc_active) && (dbb->dbb_flags & DBB_gc_background))
+		if (dbb->dbb_sweep_interval &&
+			(trans->tra_oldest_active > oldest) &&
+			(trans->tra_oldest_active - oldest > dbb->dbb_sweep_interval) &&
+			oldest_state != tra_limbo)
 		{
-			dbb->dbb_flags |= DBB_gc_pending;
-			dbb->dbb_gc_sem.release();
+			start_sweeper(tdbb);
 		}
+
+		// Start a 'transaction-level' savepoint, unless this is the
+		// system transaction, or unless the transactions doesn't want
+		// a savepoint to be started.  This savepoint will be used to
+		// undo the transaction if it rolls back.
+
+		if (!(trans->tra_flags & TRA_system) && !(trans->tra_flags & TRA_no_auto_undo))
+			trans->startSavepoint(true);
+
+		// if the user asked us to restart all requests in this attachment,
+		// do so now using the new transaction
+
+		if (trans->tra_flags & TRA_restart_requests)
+			restart_requests(tdbb, trans);
+
+		// If the transaction is read-only and read committed, it can be
+		// precommitted because it can't modify any records and doesn't
+		// need a snapshot preserved. This transaction type can run
+		// forever without impacting garbage collection or causing
+		// transaction bitmap growth.
+
+		if ((trans->tra_flags & TRA_readonly) && (trans->tra_flags & TRA_read_committed))
+		{
+			TRA_set_state(tdbb, trans, trans->tra_number, tra_committed);
+			LCK_release(tdbb, lock);
+
+			lock->lck_type = LCK_tra_pc;		// note, LCK_tra_pc belongs to the same owner as LCK_tra
+			lock->lck_data = 0;
+			if (!LCK_lock(tdbb, lock, LCK_write, LCK_WAIT))
+				ERR_post(Arg::Gds(isc_lock_conflict));
+
+			trans->tra_flags |= TRA_precommitted;
+		}
+
+		if (trans->tra_flags & TRA_precommitted)
+			TRA_precommited(tdbb, 0, trans->tra_number);
 	}
-
-	// If the transaction block is getting out of hand, force a sweep
-
-	if (dbb->dbb_sweep_interval &&
-		(trans->tra_oldest_active > oldest) &&
-		(trans->tra_oldest_active - oldest > dbb->dbb_sweep_interval) &&
-		oldest_state != tra_limbo)
+	catch (const Firebird::Exception&)
 	{
-		start_sweeper(tdbb);
-	}
-
-	// Start a 'transaction-level' savepoint, unless this is the
-	// system transaction, or unless the transactions doesn't want
-	// a savepoint to be started.  This savepoint will be used to
-	// undo the transaction if it rolls back.
-
-	if (!(trans->tra_flags & TRA_system) && !(trans->tra_flags & TRA_no_auto_undo))
-		trans->startSavepoint(true);
-
-	// if the user asked us to restart all requests in this attachment,
-	// do so now using the new transaction
-
-	if (trans->tra_flags & TRA_restart_requests)
-		restart_requests(tdbb, trans);
-
-	// If the transaction is read-only and read committed, it can be
-	// precommitted because it can't modify any records and doesn't
-	// need a snapshot preserved. This transaction type can run
-	// forever without impacting garbage collection or causing
-	// transaction bitmap growth.
-
-	if ((trans->tra_flags & TRA_readonly) && (trans->tra_flags & TRA_read_committed))
-	{
-		TRA_set_state(tdbb, trans, trans->tra_number, tra_committed);
-		LCK_release(tdbb, lock);
-
-		lock->lck_type = LCK_tra_pc;		// note, LCK_tra_pc belongs to the same owner as LCK_tra
-		lock->lck_data = 0;
-		if (!LCK_lock(tdbb, lock, LCK_write, LCK_WAIT))
-			ERR_post(Arg::Gds(isc_lock_conflict));
-
-		trans->tra_flags |= TRA_precommitted;
-	}
-
-	if (trans->tra_flags & TRA_precommitted)
-		TRA_precommited(tdbb, 0, trans->tra_number);
+		trans->unlinkFromAttachment();
+		throw;
+ 	}
 }
 
 
@@ -3386,9 +3454,9 @@ jrd_tra::~jrd_tra()
 }
 
 
-JTransaction* jrd_tra::getInterface()
+JTransaction* jrd_tra::getInterface(bool create)
 {
-	if (!tra_interface)
+	if (!tra_interface && create)
 	{
 		tra_flags |= TRA_own_interface;
 		tra_interface = FB_NEW JTransaction(this, tra_attachment->getStable());
@@ -3620,6 +3688,40 @@ void jrd_tra::rollforwardSavepoint(thread_db* tdbb)
 	}
 }
 
+void jrd_tra::checkBlob(thread_db* tdbb, const bid* blob_id)
+{
+	USHORT rel_id = blob_id->bid_internal.bid_relation_id;
+
+	if (tra_attachment->isGbak() ||
+		(tra_attachment->att_user &&
+		 tra_attachment->att_user->locksmith(tdbb, SELECT_ANY_OBJECT_IN_DATABASE)) ||
+		rel_id == 0)
+	{
+		return;
+	}
+
+	if (!tra_blobs->locate(blob_id->bid_temp_id()))
+	{
+		vec<jrd_rel*>* vector = tra_attachment->att_relations;
+		jrd_rel* blb_relation;
+
+		if (rel_id < vector->count() &&	(blb_relation = (*vector)[rel_id]))
+		{
+			if (blb_relation->rel_security_name.isEmpty())
+				MET_scan_relation(tdbb, blb_relation);
+
+			SecurityClass* s_class = SCL_get_class(tdbb, blb_relation->rel_security_name.c_str());
+
+			if (s_class && !s_class->scl_blb_access)
+			{
+				SCL_check_access(tdbb, s_class, 0, 0, NULL, SCL_select, SCL_object_table, false,
+					blb_relation->rel_name);
+				s_class->scl_blb_access = true;
+			}
+		}
+	}
+}
+
 /// class TraceSweepEvent
 
 TraceSweepEvent::TraceSweepEvent(thread_db* tdbb)
@@ -3637,7 +3739,7 @@ TraceSweepEvent::TraceSweepEvent(thread_db* tdbb)
 	gds__log("Sweep is started by %s\n"
 		"\tDatabase \"%s\" \n"
 		"\tOIT %" SQUADFORMAT", OAT %" SQUADFORMAT", OST %" SQUADFORMAT", Next %" SQUADFORMAT,
-		att->att_user->getUserName().c_str(),
+		att->att_user ? att->att_user->getUserName().c_str() : "<Unknown user>",
 		att->att_filename.c_str(),
 		m_sweep_info.getOIT(),
 		m_sweep_info.getOAT(),

@@ -127,6 +127,11 @@ using namespace Firebird;
 #include <process.h>
 #include <signal.h>
 #include "../utilities/install/install_nt.h"
+#include <mstcpip.h>
+
+#ifndef SIO_LOOPBACK_FAST_PATH
+#define SIO_LOOPBACK_FAST_PATH              _WSAIOW(IOC_VENDOR,16)
+#endif
 
 #define INET_RETRY_ERRNO	WSAEINPROGRESS
 #define INET_ADDR_IN_USE	WSAEADDRINUSE
@@ -452,7 +457,7 @@ static rem_port*		inet_try_connect(	PACKET*,
 									const PathName&,
 									const TEXT*,
 									ClumpletReader&,
-									RefPtr<Config>*,
+									RefPtr<const Config>*,
 									const PathName*,
 									int);
 static bool		inet_write(XDR*);
@@ -476,6 +481,7 @@ static int		send_partial(rem_port*, PACKET *);
 
 static int		xdrinet_create(XDR*, rem_port*, UCHAR *, USHORT, enum xdr_op);
 static bool		setNoNagleOption(rem_port*);
+static bool		setFastLoopbackOption(SOCKET s);
 static FPTR_INT	tryStopMainThread = 0;
 
 
@@ -532,8 +538,9 @@ rem_port* INET_analyze(ClntAuthBlock* cBlock,
 					   const TEXT* node_name,
 					   bool uv_flag,
 					   ClumpletReader &dpb,
-					   RefPtr<Config>* config,
+					   RefPtr<const Config>* config,
 					   const PathName* ref_db_name,
+					   Firebird::ICryptKeyCallback* cryptCb,
 					   int af)
 {
 /**************************************
@@ -613,7 +620,9 @@ rem_port* INET_analyze(ClntAuthBlock* cBlock,
 		REMOTE_PROTOCOL(PROTOCOL_VERSION11, ptype_lazy_send, 2),
 		REMOTE_PROTOCOL(PROTOCOL_VERSION12, ptype_lazy_send, 3),
 		REMOTE_PROTOCOL(PROTOCOL_VERSION13, ptype_lazy_send, 4),
-		REMOTE_PROTOCOL(PROTOCOL_VERSION14, ptype_lazy_send, 5)
+		REMOTE_PROTOCOL(PROTOCOL_VERSION14, ptype_lazy_send, 5),
+		REMOTE_PROTOCOL(PROTOCOL_VERSION15, ptype_lazy_send, 6),
+		REMOTE_PROTOCOL(PROTOCOL_VERSION16, ptype_lazy_send, 7)
 	};
 	fb_assert(FB_NELEM(protocols_to_try) <= FB_NELEM(cnct->p_cnct_versions));
 	cnct->p_cnct_count = FB_NELEM(protocols_to_try);
@@ -628,51 +637,96 @@ rem_port* INET_analyze(ClntAuthBlock* cBlock,
 	}
 
 	rem_port* port = inet_try_connect(packet, rdb, file_name, node_name, dpb, config, ref_db_name, af);
+	P_ACPT* accept;
 
-	P_ACPT* accept = NULL;
-	switch (packet->p_operation)
+	for (;;)
 	{
-	case op_accept_data:
-	case op_cond_accept:
-		accept = &packet->p_acpd;
-		if (cBlock)
+		accept = NULL;
+		switch (packet->p_operation)
 		{
-			cBlock->storeDataForPlugin(packet->p_acpd.p_acpt_data.cstr_length,
-									   packet->p_acpd.p_acpt_data.cstr_address);
-			cBlock->authComplete = packet->p_acpd.p_acpt_authenticated;
-			port->addServerKeys(&packet->p_acpd.p_acpt_keys);
-			cBlock->resetClnt(&file_name, &packet->p_acpd.p_acpt_keys);
-		}
-		break;
+		case op_accept_data:
+		case op_cond_accept:
+			accept = &packet->p_acpd;
+			if (cBlock)
+			{
+				cBlock->storeDataForPlugin(packet->p_acpd.p_acpt_data.cstr_length,
+										   packet->p_acpd.p_acpt_data.cstr_address);
+				cBlock->authComplete = packet->p_acpd.p_acpt_authenticated;
+				port->addServerKeys(&packet->p_acpd.p_acpt_keys);
+				cBlock->resetClnt(&file_name, &packet->p_acpd.p_acpt_keys);
+			}
+			break;
 
-	case op_accept:
-		if (cBlock)
-		{
-			cBlock->resetClnt(&file_name);
-		}
-		accept = &packet->p_acpt;
-		break;
+		case op_accept:
+			if (cBlock)
+			{
+				cBlock->resetClnt(&file_name);
+			}
+			accept = &packet->p_acpt;
+			break;
 
-	case op_response:
-		try
-		{
-			LocalStatus warning;		// Ignore connect warnings for a while
-			CheckStatusWrapper statusWrapper(&warning);
-			REMOTE_check_response(&statusWrapper, rdb, packet, false);
-		}
-		catch (const Exception&)
-		{
+		case op_crypt_key_callback:
+			try
+			{
+				UCharBuffer buf;
+				P_CRYPT_CALLBACK* cc = &packet->p_cc;
+
+				if (cryptCb)
+				{
+					if (cc->p_cc_reply <= 0)
+					{
+						cc->p_cc_reply = 1;
+					}
+					UCHAR* reply = buf.getBuffer(cc->p_cc_reply);
+					unsigned l = cryptCb->callback(cc->p_cc_data.cstr_length,
+						cc->p_cc_data.cstr_address, cc->p_cc_reply, reply);
+
+					REMOTE_free_packet(port, packet, true);
+					cc->p_cc_data.cstr_length = l;
+					cc->p_cc_data.cstr_address = reply;
+				}
+				else
+				{
+					REMOTE_free_packet(port, packet, true);
+					cc->p_cc_data.cstr_length = 0;
+				}
+
+				packet->p_operation = op_crypt_key_callback;
+				cc->p_cc_reply = 0;
+				port->send(packet);
+				port->receive(packet);
+				continue;
+			}
+			catch (const Exception&)
+			{
+				disconnect(port);
+				delete rdb;
+				throw;
+			}
+
+		case op_response:
+			try
+			{
+				LocalStatus warning;		// Ignore connect warnings for a while
+				CheckStatusWrapper statusWrapper(&warning);
+				REMOTE_check_response(&statusWrapper, rdb, packet, false);
+			}
+			catch (const Exception&)
+			{
+				disconnect(port);
+				delete rdb;
+				throw;
+			}
+			// fall through - response is not a required accept
+
+		default:
 			disconnect(port);
 			delete rdb;
-			throw;
+			Arg::Gds(isc_connect_reject).raise();
+			break;
 		}
-		// fall through - response is not a required accept
 
-	default:
-		disconnect(port);
-		delete rdb;
-		Arg::Gds(isc_connect_reject).raise();
-		break;
+		break;	// Always leave for() loop here
 	}
 
 	fb_assert(accept);
@@ -702,7 +756,10 @@ rem_port* INET_analyze(ClntAuthBlock* cBlock,
 	}
 
 	if (compress)
+	{
 		port->initCompression();
+		port->port_flags |= PORT_compressed;
+	}
 
 	return port;
 }
@@ -711,7 +768,7 @@ rem_port* INET_connect(const TEXT* name,
 					   PACKET* packet,
 					   USHORT flag,
 					   ClumpletReader* dpb,
-					   RefPtr<Config>* config,
+					   RefPtr<const Config>* config,
 					   int af)
 {
 /**************************************
@@ -883,6 +940,8 @@ rem_port* INET_connect(const TEXT* name,
 				goto err_close;
 			}
 
+			setFastLoopbackOption(port->port_handle);
+
 			n = connect(port->port_handle, pai->ai_addr, pai->ai_addrlen);
 			if (n != -1)
 			{
@@ -978,11 +1037,13 @@ static rem_port* listener_socket(rem_port* port, USHORT flag, const addrinfo* pa
 		{
 			inet_error(true, port, "setsockopt LINGER", isc_net_connect_listen_err, INET_ERRNO);
 		}
+	}
 
-		if (! setNoNagleOption(port))
-		{
-			inet_error(true, port, "setsockopt TCP_NODELAY", isc_net_connect_listen_err, INET_ERRNO);
-		}
+	// RS: In linux sockets inherit this option from listener. Previously CLASSIC had no its own listen socket
+	// Now it's necessary to respect the option via listen socket.
+	if (! setNoNagleOption(port))
+	{
+		inet_error(true, port, "setsockopt TCP_NODELAY", isc_net_connect_listen_err, INET_ERRNO);
 	}
 
 	// On Linux platform, when the server dies the system holds a port
@@ -1006,6 +1067,8 @@ static rem_port* listener_socket(rem_port* port, USHORT flag, const addrinfo* pa
 	{
 		inet_error(false, port, "listen", isc_net_connect_listen_err, INET_ERRNO);
 	}
+
+	setFastLoopbackOption(port->port_handle);
 
 	inet_ports->registerPort(port);
 
@@ -1427,6 +1490,7 @@ static rem_port* aux_connect(rem_port* port, PACKET* packet)
 
 	int optval = 1;
 	setsockopt(n, SOL_SOCKET, SO_KEEPALIVE, (SCHAR*) &optval, sizeof(optval));
+	setFastLoopbackOption(n);
 
 	status = address.connect(n);
 	if (status < 0)
@@ -1507,6 +1571,8 @@ static rem_port* aux_request( rem_port* port, PACKET* packet)
 	{
 		inet_error(false, port, "listen", isc_net_event_listen_err, INET_ERRNO);
 	}
+
+	setFastLoopbackOption(n);
 
 	rem_port* const new_port = alloc_port(port->port_parent,
 		(port->port_flags & PORT_no_oob) | PORT_async | PORT_connecting);
@@ -1629,7 +1695,10 @@ static void disconnect(rem_port* const port)
 		SOCLOSE(port->port_channel);
 	}
 
-	port->release();
+	if (port->port_thread_guard && port->port_events_thread && !Thread::isCurrent(port->port_events_threadId))
+		port->port_thread_guard->setWait(port->port_events_thread);
+	else
+		port->release();
 
 #ifdef DEBUG
 	if (INET_trace & TRACE_summary)
@@ -2023,6 +2092,8 @@ static void select_port(rem_port* main_port, Select* selct, RemPortPtr& port)
 		{
 		case Select::SEL_BAD:
 			if (port->port_state == rem_port::BROKEN || (port->port_flags & PORT_connecting))
+				continue;
+			if (port->port_flags & PORT_async)
 				continue;
 			return;
 
@@ -2646,7 +2717,7 @@ static rem_port* inet_try_connect(PACKET* packet,
 								  const PathName& file_name,
 								  const TEXT* node_name,
 								  ClumpletReader& dpb,
-								  RefPtr<Config>* config,
+								  RefPtr<const Config>* config,
 								  const PathName* ref_db_name,
 								  int af)
 {
@@ -2808,7 +2879,8 @@ static bool packet_receive(rem_port* port, UCHAR* buffer, SSHORT buffer_length, 
 	const SOCKET ph = port->port_handle;
 	if (ph == INVALID_SOCKET)
 	{
-		if (!(port->port_flags & PORT_disconnect))
+		const bool releasePort = (port->port_flags & PORT_server);
+		if (!(port->port_flags & PORT_disconnect) && releasePort)
 			inet_error(true, port, "invalid socket in packet_receive", isc_net_read_err, EINVAL);
 
 		return false;
@@ -3002,6 +3074,9 @@ static bool packet_send( rem_port* port, const SCHAR* buffer, SSHORT buffer_leng
 		}
 #endif
 		SSHORT n = send(port->port_handle, data, length, FB_SEND_FLAGS);
+#if COMPRESS_DEBUG > 1
+		fprintf(stderr, "send(%d, %p, %d, FB_SEND_FLAGS) == %d\n", port->port_handle, data, length, n);
+#endif
 #ifdef DEBUG
 		if (INET_trace & TRACE_operations)
 		{
@@ -3154,6 +3229,21 @@ static bool setNoNagleOption(rem_port* port)
 		}
 	}
 	return true;
+}
+
+bool setFastLoopbackOption(SOCKET s)
+{
+#ifdef WIN_NT
+	int optval = 1;
+	DWORD bytes = 0;
+
+	int ret = WSAIoctl(s, SIO_LOOPBACK_FAST_PATH, &optval, sizeof(optval),
+					   NULL, 0, &bytes, 0, 0);
+
+	return (ret == 0);
+#else
+	return false;
+#endif
 }
 
 void setStopMainThread(FPTR_INT func)

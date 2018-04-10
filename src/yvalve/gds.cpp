@@ -58,6 +58,7 @@
 #include "../common/classes/init.h"
 #include "../common/classes/TempFile.h"
 #include "../common/utils_proto.h"
+#include "../common/ThreadStart.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -259,6 +260,7 @@ const int op_derived_expr	= 25;
 const int op_partition_args	= 26;
 const int op_subproc_decl	= 27;
 const int op_subfunc_decl	= 28;
+const int op_window_win		= 29;
 
 static const UCHAR
 	// generic print formats
@@ -339,7 +341,11 @@ static const UCHAR
 	decode[] = { op_line, op_verb, op_indent, op_byte, op_line, op_args, op_indent, op_byte,
 				 op_line, op_args, 0},
 	subproc_decl[] = { op_subproc_decl, 0},
-	subfunc_decl[] = { op_subfunc_decl, 0};
+	subfunc_decl[] = { op_subfunc_decl, 0},
+	window_win[] = { op_byte, op_window_win, 0},
+	relation_field[] = { op_line, op_indent, op_byte, op_literal,
+						 op_line, op_indent, op_byte, op_literal, op_pad, op_line, 0},
+	store3[] = { op_line, op_byte, op_line, op_verb, op_verb, op_verb, 0};
 
 
 #include "../jrd/blp.h"
@@ -615,7 +621,7 @@ SINT64 API_ROUTINE isc_portable_integer(const UCHAR* ptr, SSHORT length)
  *
  * Functional description
  *	Pick up (and convert) a Little Endian (VAX) style integer
- *      of length 1, 2, 4 or 8 bytes to local system's Endian format.
+ *      of variable length to local system's Endian format.
  *
  *   various parameter blocks (i.e., dpb, tpb, spb) flatten out multibyte
  *   values into little endian byte ordering before network transmission.
@@ -634,10 +640,15 @@ SINT64 API_ROUTINE isc_portable_integer(const UCHAR* ptr, SSHORT length)
 		return 0;
 
 	SINT64 value = 0;
+	int shift = 0;
 
-	for (int shift = 0; --length >= 0; shift += 8) {
+	while (--length > 0)
+	{
 		value += ((SINT64) *ptr++) << shift;
+		shift += 8;
 	}
+
+	value += ((SINT64)(SCHAR) *ptr) << shift;
 
 	return value;
 }
@@ -2532,18 +2543,22 @@ SLONG API_ROUTINE gds__vax_integer(const UCHAR* ptr, SSHORT length)
  **************************************
  *
  * Functional description
- *	Pick up (and convert) a VAX style integer of length 1, 2, or 4
- *	bytes.
+ *	Pick up (and convert) a VAX style integer of variable length.
  *
  **************************************/
 	if (!ptr || length <= 0 || length > 4)
 		return 0;
 
 	SLONG value = 0;
+	int shift = 0;
 
-	for (int shift = 0; --length >= 0; shift += 8) {
+	while (--length > 0)
+	{
 		value += ((SLONG) *ptr++) << shift;
+		shift += 8;
 	}
+
+	value += ((SLONG)(SCHAR) *ptr) << shift;
 
 	return value;
 }
@@ -3383,10 +3398,14 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 
 			int inputs = 0;
 			int outputs = 0;
+
 			while ((blr_operator = control->ctl_blr_reader.getByte()) != blr_end)
 			{
 				blr_indent(control, level);
-				blr_format(control, "blr_exec_stmt_%s, ", sub_codes[blr_operator]);
+
+				if (blr_operator > 0 && blr_operator < FB_NELEM(sub_codes))
+					blr_format(control, "blr_exec_stmt_%s, ", sub_codes[blr_operator]);
+
 				switch (blr_operator)
 				{
 				case blr_exec_stmt_inputs:
@@ -3593,6 +3612,94 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 			break;
 		}
 
+		case op_window_win:
+		{
+			offset = blr_print_line(control, offset);
+			static const char* sub_codes[] =
+			{
+				NULL,
+				"partition",
+				"order",
+				"map",
+				"extent_unit",
+				"extent_frame_bound",
+				"extent_frame_value",
+				"exclusion"
+			};
+
+			while ((blr_operator = control->ctl_blr_reader.getByte()) != blr_end)
+			{
+				blr_indent(control, level);
+
+				if (blr_operator > 0 && blr_operator < FB_NELEM(sub_codes))
+					blr_format(control, "blr_window_win_%s, ", sub_codes[blr_operator]);
+
+				switch (blr_operator)
+				{
+					case blr_window_win_partition:
+					case blr_window_win_order:
+						n = blr_print_byte(control);
+						offset = blr_print_line(control, offset);
+						++level;
+
+						while (--n >= 0)
+						{
+							blr_print_verb(control, level);
+
+							if (blr_operator == blr_window_win_partition)
+								blr_print_verb(control, level);
+						}
+
+						--level;
+						break;
+
+					case blr_window_win_map:
+						n = blr_print_word(control);
+						offset = blr_print_line(control, offset);
+						++level;
+
+						while (--n >= 0)
+						{
+							blr_indent(control, level);
+							blr_print_word(control);
+							offset = blr_print_line(control, (SSHORT) offset);
+							blr_print_verb(control, level);
+						}
+
+						--level;
+						break;
+
+					case blr_window_win_extent_unit:
+					case blr_window_win_exclusion:
+						blr_print_byte(control);
+						offset = blr_print_line(control, offset);
+						break;
+
+					case blr_window_win_extent_frame_bound:
+						blr_print_byte(control);
+						blr_print_byte(control);
+						offset = blr_print_line(control, offset);
+						break;
+
+					case blr_window_win_extent_frame_value:
+						blr_print_byte(control);
+						offset = blr_print_line(control, offset);
+						++level;
+						blr_print_verb(control, level);
+						--level;
+						break;
+
+					default:
+						fb_assert(false);
+				}
+			}
+
+			// print blr_end
+			control->ctl_blr_reader.seekBackward(1);
+			blr_print_verb(control, level);
+			break;
+		}
+
 		default:
 			fb_assert(false);
 			break;
@@ -3775,35 +3882,6 @@ public:
 #ifndef WIN_NT
 			PathUtils::concatPath(lockPrefix, WORKFILE, LOCKDIR);
 #else
-#ifdef WIN9X_SUPPORT
-			// shell32.dll version 5.0 and later supports SHGetFolderPath entry point
-			HMODULE hShFolder = LoadLibrary("shell32.dll");
-			PFNSHGETFOLDERPATHA pfnSHGetFolderPath =
-				(PFNSHGETFOLDERPATHA) GetProcAddress(hShFolder, "SHGetFolderPathA");
-
-			if (!pfnSHGetFolderPath)
-			{
-				// For old OS versions fall back to shfolder.dll
-				FreeLibrary(hShFolder);
-				hShFolder = LoadLibrary("shfolder.dll");
-				pfnSHGetFolderPath =
-					(PFNSHGETFOLDERPATHA) GetProcAddress(hShFolder, "SHGetFolderPathA");
-			}
-
-			char cmnData[MAXPATHLEN];
-			if (pfnSHGetFolderPath &&
-				pfnSHGetFolderPath(NULL, CSIDL_COMMON_APPDATA | CSIDL_FLAG_CREATE, NULL,
-					SHGFP_TYPE_CURRENT, cmnData) == S_OK)
-			{
-				PathUtils::concatPath(lockPrefix, cmnData, LOCKDIR);
-			}
-			else
-			{
-				// If shfolder.dll is missing or API fails fall back to using old style location for locks
-				lockPrefix = prefix;
-			}
-			FreeLibrary(hShFolder);
-#else
 			char cmnData[MAXPATHLEN];
 			if (SHGetSpecialFolderPath(NULL, cmnData, CSIDL_COMMON_APPDATA, TRUE))
 			{
@@ -3813,7 +3891,6 @@ public:
 			{
 				lockPrefix = prefix;	// emergency default
 			}
-#endif  // WIN9X_SUPPORT
 #endif  // WIN_NT
 		}
 		lockPrefix.copyTo(fb_prefix_lock_val, sizeof(fb_prefix_lock_val));

@@ -31,23 +31,25 @@
 #define JRD_CHARSET_H
 
 #include "CsConvert.h"
+#include "IntlUtil.h"
+
+namespace Firebird {
+
+	template <>
+	inline void SimpleDelete<charset>::clear(charset* cs)
+	{
+		Firebird::IntlUtil::finiCharset(cs);
+		delete cs;
+	}
+
+}
+
 
 namespace Jrd {
 
 class CharSet
 {
 public:
-	class Delete
-	{
-	public:
-		static void clear(charset* cs)
-		{
-			if (cs->charset_fn_destroy)
-				cs->charset_fn_destroy(cs);
-			delete cs;
-		}
-	};
-
 	static CharSet* createInstance(Firebird::MemoryPool& pool, USHORT id, charset* cs);
 
 protected:
@@ -116,8 +118,7 @@ public:
 
 	void destroy()
 	{
-		if (cs->charset_fn_destroy)
-			cs->charset_fn_destroy(cs);
+		Firebird::IntlUtil::finiCharset(cs);
 	}
 
 	const UCHAR* getSqlMatchAny() const { return sqlMatchAny; }

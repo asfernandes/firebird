@@ -140,7 +140,21 @@ enum db_info_types
 	fb_info_pages_used = 124,
 	fb_info_pages_free = 125,
 
-	fb_info_crypt_state = 126,
+	// codes 126 and 127 are used for special purposes
+	// do not use them here
+
+	fb_info_ses_idle_timeout_db = 129,
+	fb_info_ses_idle_timeout_att = 130,
+	fb_info_ses_idle_timeout_run = 131,
+
+	fb_info_conn_flags = 132,
+	fb_info_protocol_version = 133,
+
+	fb_info_crypt_key = 133,
+	fb_info_crypt_state = 134,
+
+	fb_info_statement_timeout_db = 135,
+	fb_info_statement_timeout_att = 136,
 
 	isc_info_db_last_value   /* Leave this LAST! */
 };
@@ -241,7 +255,8 @@ enum  info_db_implementations
 	isc_info_db_impl_linux_arm64 = 84,
 	isc_info_db_impl_linux_ppc64el = 85,
 	isc_info_db_impl_linux_ppc64 = 86,
-
+	isc_info_db_impl_linux_m68k = 87,
+	isc_info_db_impl_linux_riscv64 = 88,
 
 	isc_info_db_impl_last_value   // Leave this LAST!
 };
@@ -418,6 +433,9 @@ enum info_db_provider
 #define isc_info_sql_relation_alias		25
 #define isc_info_sql_explain_plan		26
 #define isc_info_sql_stmt_flags         27
+#define isc_info_sql_stmt_timeout_user	28
+#define isc_info_sql_stmt_timeout_run	29
+#define isc_info_sql_stmt_blob_align	30
 
 /*********************************/
 /* SQL information return values */

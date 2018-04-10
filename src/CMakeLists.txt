@@ -29,7 +29,6 @@ set(epp_boot_internal_files
     burp/backup.epp
     burp/restore.epp
     burp/OdsDetection.epp
-    utilities/gstat/dba.epp
 )
 set(epp_boot_ocxx_files
     isql/extract.epp
@@ -42,6 +41,7 @@ set(epp_boot_files
     utilities/stats.epp
     yvalve/array.epp
     yvalve/blob.epp
+    utilities/gstat/dba.epp
 )
 set(epp_boot_gds_files
     dsql/metd.epp
@@ -54,7 +54,6 @@ set(epp_boot_gds_files
     jrd/grant.epp
     jrd/ini.epp
     jrd/met.epp
-    jrd/pcmet.epp
     jrd/scl.epp
     jrd/Function.epp
 )
@@ -70,12 +69,12 @@ set(epp_master_files
 
 if (NOT CMAKE_CROSSCOMPILING)
 
-epp_process(boot    epp_boot_internal_files ${GPRE_BOOT_CMD} -lang_internal -n -m)
+epp_process(boot    epp_boot_internal_files ${GPRE_BOOT_CMD} -lang_internal -n -ids -ocxx -m)
 epp_process(boot    epp_boot_ocxx_files     ${GPRE_BOOT_CMD} -lang_internal -n -ids -ocxx)
 epp_process(boot    epp_boot_files          ${GPRE_BOOT_CMD} -n -m)
 epp_process(boot    epp_boot_gds_files      ${GPRE_BOOT_CMD} -n -ids -gds_cxx)
 
-epp_process(master  epp_boot_internal_files ${BOOT_GPRE_CMD} -n -m)
+epp_process(master  epp_boot_internal_files ${BOOT_GPRE_CMD} -n -m -ids -ocxx -m)
 epp_process(master  epp_boot_ocxx_files     ${BOOT_GPRE_CMD} -n -ids -ocxx)
 epp_process(master  epp_boot_files          ${BOOT_GPRE_CMD} -n -m)
 epp_process(master  epp_boot_gds_files      ${BOOT_GPRE_CMD} -n -ids -gds_cxx)
@@ -257,6 +256,10 @@ add_custom_command(
     COMMAND sed -n "/%type .*/p" ${CMAKE_CURRENT_SOURCE_DIR}/dsql/parse.y > types.y
     COMMAND sed "s/%type .*//" ${CMAKE_CURRENT_SOURCE_DIR}/dsql/parse.y > y.y
     COMMAND btyacc -l -d -S ${CMAKE_CURRENT_SOURCE_DIR}/dsql/btyacc_fb.ske y.y
+
+    COMMAND sed -i "s/#define \\([A-Z].*\\)/#define TOK_\\1/g" y_tab.h
+    COMMAND sed -i "s/#define TOK_YY\\(.*\\)/#define YY\\1/g" y_tab.h
+
     COMMAND ${CMAKE_COMMAND} -E copy_if_different y_tab.h include/gen/parse.h
     COMMAND ${CMAKE_COMMAND} -E copy_if_different y_tab.c dsql/parse.cpp
     COMMENT "Generating parse.cpp, parse.h"
@@ -264,7 +267,7 @@ add_custom_command(
 )
 add_custom_target(parse
     DEPENDS y_tab.h y_tab.c
-    SOURCES ${parse_src}
+    SOURCES ${parse_src} y_tab.h y_tab.c
 )
 project_group(parse "Boot/Custom build steps")
 set_source_files_properties(dsql/parse.cpp include/gen/parse.h PROPERTIES GENERATED TRUE)
@@ -370,8 +373,11 @@ if (APPLE)
 endif()
 
 add_library                 (common ${common_src} ${common_os_src} ${common_include})
-target_link_libraries       (common ${LIB_mpr})
+target_link_libraries       (common ${LIB_mpr} libtommath libtomcrypt decNumber)
 add_dependencies_cc         (common UpdateCloopInterfaces)
+if (UNIX)
+target_link_libraries       (common dl)
+endif()
 
 
 ################################################################################
@@ -413,7 +419,6 @@ add_library                 (boot_yvalve SHARED $<TARGET_OBJECTS:yvalve_common> 
 target_link_libraries       (boot_yvalve
     PRIVATE remote
     PRIVATE common
-    PUBLIC libtommath
     PUBLIC ${LIB_Ws2_32}
     PUBLIC ${LIB_readline}
     PUBLIC ${LIB_dl}
@@ -436,7 +441,6 @@ add_library                 (yvalve SHARED $<TARGET_OBJECTS:yvalve_common> ${yva
 target_link_libraries       (yvalve
     PRIVATE remote
     PRIVATE common
-    PUBLIC libtommath
     PUBLIC ${LIB_Ws2_32}
     PUBLIC ${LIB_readline}
     PUBLIC ${LIB_dl}
@@ -465,9 +469,9 @@ set(engine_src ${engine_src}
     lock/lock.cpp
     utilities/gsec/gsec.cpp
     utilities/gstat/ppg.cpp
-    utilities/nbackup/nbackup.cpp    
+    utilities/nbackup/nbackup.cpp
     # parse
-    ${GENERATED_DIR}/dsql/parse.cpp   
+    ${GENERATED_DIR}/dsql/parse.cpp
 )
 add_src_apple(engine_src
     jrd/os/posix/unix.cpp
@@ -484,7 +488,6 @@ set(engine_generated_src
     jrd/grant.epp
     jrd/ini.epp
     jrd/met.epp
-    jrd/pcmet.epp
     jrd/scl.epp
     utilities/gstat/dba.epp
 )
@@ -541,17 +544,6 @@ set_output_directory_unix   (ib_util lib)
 
 
 ########################################
-# SHARED LIBRARY ib_udf
-########################################
-
-add_library                 (ib_udf SHARED extlib/ib_udf.cpp extlib/ib_udf.h ${VERSION_RC})
-target_link_libraries       (ib_udf ib_util)
-set_target_properties       (ib_udf PROPERTIES PREFIX "")
-set_exported_symbols        (ib_udf ib_udf)
-set_output_directory        (ib_udf UDF)
-
-
-########################################
 # SHARED LIBRARY legacy_usermanager
 ########################################
 
@@ -578,27 +570,6 @@ add_library                 (udr_engine SHARED ${udr_engine_src} ${VERSION_RC})
 target_link_libraries       (udr_engine common yvalve)
 set_output_directory        (udr_engine plugins)
 set_exported_symbols        (udr_engine fbplugin)
-
-
-########################################
-# SHARED LIBRARY fbudf
-########################################
-
-set(fbudf_src
-    extlib/fbudf/fbudf.cpp
-    extlib/fbudf/stdafx.cpp
-
-    extlib/fbudf/fbudf.txt
-    extlib/fbudf/fbudf.sql
-
-    jrd/ibase.h
-)
-file(GLOB fbudf_include "extlib/fbudf/*.h")
-
-add_library                 (fbudf SHARED ${fbudf_src} ${fbudf_include} ${VERSION_RC})
-target_link_libraries       (fbudf common yvalve)
-set_target_properties       (fbudf PROPERTIES PREFIX "")
-set_output_directory        (fbudf UDF)
 
 
 ########################################
@@ -939,7 +910,7 @@ add_custom_target(copy_files
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GENERATED_DIR}/security.fdb ${output_dir}/security4.fdb
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GENERATED_DIR}/help.fdb ${output_dir}/help/help.fdb
     # configs, text files
-    COMMAND sed "/@UDF_COMMENT@/d" < ${CMAKE_SOURCE_DIR}/builds/install/misc/firebird.conf.in > ${output_dir}/firebird.conf    
+    COMMAND sed "/@UDF_COMMENT@/d" < ${CMAKE_SOURCE_DIR}/builds/install/misc/firebird.conf.in > ${output_dir}/firebird.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/misc/databases.conf.in ${output_dir}/databases.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/misc/fbintl.conf ${output_dir}/intl/fbintl.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/misc/plugins.conf ${output_dir}/plugins.conf
@@ -947,10 +918,6 @@ add_custom_target(copy_files
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/misc/IDPLicense.txt ${output_dir}/IDPLicense.txt
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/utilities/ntrace/fbtrace.conf ${output_dir}/fbtrace.conf
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/plugins/udr_engine/udr_engine.conf ${output_dir}/plugins/udr_engine.conf
-    # udf
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/extlib/ib_udf.sql ${output_dir}/UDF/ib_udf.sql
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/extlib/ib_udf2.sql ${output_dir}/UDF/ib_udf2.sql
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/extlib/fbudf/fbudf.sql ${output_dir}/UDF/fbudf.sql
     # docs
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/CHANGELOG.md ${output_dir}/doc/CHANGELOG.md
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/README.md ${output_dir}/doc/README.md
@@ -967,7 +934,7 @@ add_custom_target(copy_files
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/examples/udr ${output_dir}/examples/udr
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/examples/stat ${output_dir}/examples/stat
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/examples/functions.c ${output_dir}/examples/functions.c
-    # headers    
+    # headers
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/extlib/ib_util.h ${output_dir}/include/ib_util.h
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/include/gen/iberror.h ${output_dir}/include/iberror.h
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/yvalve/perf.h ${output_dir}/include/perf.h
@@ -1019,7 +986,7 @@ if (WIN32)
         # installers
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/arch-specific/win32/install_classic.bat ${output_dir}/install_classic.bat
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/arch-specific/win32/install_super.bat ${output_dir}/install_super.bat
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/arch-specific/win32/uninstall.bat ${output_dir}/uninstall.bat        
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/builds/install/arch-specific/win32/uninstall.bat ${output_dir}/uninstall.bat
         # examples
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/examples/build_unix ${output_dir}/examples/build_unix
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/examples/build_win32 ${output_dir}/examples/build_win32
@@ -1028,7 +995,7 @@ if (WIN32)
         COMMAND echo "#pragma message(\"Non-production version of ibase.h.\")" > ${output_dir}/include/ibase.tmp
         COMMAND echo "#pragma message(\"Using raw, unprocessed concatenation of header files.\")" >> ${output_dir}/include/ibase.tmp
     )
-    set(files    
+    set(files
         ${CMAKE_SOURCE_DIR}/src/misc/ibase_header.txt
         ${CMAKE_SOURCE_DIR}/src/include/types_pub.h
         ${CMAKE_SOURCE_DIR}/src/common/dsc_pub.h
@@ -1050,15 +1017,6 @@ if (WIN32)
         COMMAND sed -f ${CMAKE_SOURCE_DIR}/src/misc/headers.sed < ${output_dir}/include/ibase.tmp > ${output_dir}/include/ibase.h
         COMMAND ${CMAKE_COMMAND} -E remove ${output_dir}/include/ibase.tmp
     )
-    file(GLOB files
-        "${CMAKE_SOURCE_DIR}/src/extlib/ib_udf*"
-        "${CMAKE_SOURCE_DIR}/src/extlib/fbudf/*"
-    )
-    foreach(F ${files})
-        get_filename_component(name ${F} NAME)
-        add_custom_command(TARGET copy_files POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${F} ${output_dir}/examples/udf/${name})
-    endforeach()
 endif()
 
 

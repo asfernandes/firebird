@@ -104,7 +104,6 @@
 #include "../intl/charsets.h"
 #include "../intl/country_codes.h"
 #include "../common/gdsassert.h"
-//#include "../jrd/license.h"
 #ifdef INTL_BUILTIN
 #include "../intl/ld_proto.h"
 #endif
@@ -547,32 +546,9 @@ void INTL_adjust_text_descriptor(thread_db* tdbb, dsc* desc)
 		{
 			Firebird::HalfStaticArray<UCHAR, BUFFER_SMALL> buffer;
 
-			if (charSet->getFlags() & CHARSET_LEGACY_SEMANTICS)
-			{
-				desc->dsc_length = charSet->substring(TEXT_LEN(desc), desc->dsc_address, TEXT_LEN(desc),
-										buffer.getBuffer(TEXT_LEN(desc) * charSet->maxBytesPerChar()), 0,
-										TEXT_LEN(desc));
-
-				const ULONG maxLength = TEXT_LEN(desc) / charSet->maxBytesPerChar();
-				ULONG charLength = charSet->length(desc->dsc_length, desc->dsc_address, true);
-
-				while (charLength > maxLength)
-				{
-					if (desc->dsc_address[desc->dsc_length - 1] == *charSet->getSpace())
-					{
-						--desc->dsc_length;
-						--charLength;
-					}
-					else
-						break;
-				}
-			}
-			else
-			{
-				desc->dsc_length = charSet->substring(TEXT_LEN(desc), desc->dsc_address,
-										TEXT_LEN(desc), buffer.getBuffer(TEXT_LEN(desc)), 0,
-										TEXT_LEN(desc) / charSet->maxBytesPerChar());
-			}
+			desc->dsc_length = charSet->substring(TEXT_LEN(desc), desc->dsc_address,
+				TEXT_LEN(desc), buffer.getBuffer(TEXT_LEN(desc)), 0,
+				TEXT_LEN(desc) / charSet->maxBytesPerChar());
 		}
 	}
 }
@@ -633,11 +609,11 @@ int INTL_compare(thread_db* tdbb, const dsc* pText1, const dsc* pText2, ErrorFun
 
 	UCHAR* p1;
 	USHORT t1;
-	ULONG length1 = CVT_get_string_ptr(pText1, &t1, &p1, NULL, 0, err);
+	ULONG length1 = CVT_get_string_ptr(pText1, &t1, &p1, NULL, 0, tdbb->getAttachment()->att_dec_status, err);
 
 	UCHAR* p2;
 	USHORT t2;
-	ULONG length2 = CVT_get_string_ptr(pText2, &t2, &p2, NULL, 0, err);
+	ULONG length2 = CVT_get_string_ptr(pText2, &t2, &p2, NULL, 0, tdbb->getAttachment()->att_dec_status, err);
 
 	// YYY - by SQL II compare_type must be explicit in the
 	// SQL statement if there is any doubt
@@ -843,7 +819,7 @@ int INTL_convert_string(dsc* to, const dsc* from, ErrorFunction err)
 
 	UCHAR* from_ptr;
 	USHORT from_type;
-	const USHORT from_len = CVT_get_string_ptr(from, &from_type, &from_ptr, NULL, 0, err);
+	const USHORT from_len = CVT_get_string_ptr(from, &from_type, &from_ptr, NULL, 0, tdbb->getAttachment()->att_dec_status, err);
 
 	const ULONG to_size = TEXT_LEN(to);
 	ULONG from_fill, to_fill;
@@ -951,9 +927,7 @@ int INTL_convert_string(dsc* to, const dsc* from, ErrorFunction err)
 	const ULONG src_len = toCharSet->length(toLength, start, false);
 	const ULONG dest_len  = (ULONG) to_size / toCharSet->maxBytesPerChar();
 
-	if (toCharSet->isMultiByte() &&
-		!(toCharSet->getFlags() & CHARSET_LEGACY_SEMANTICS) &&
-		src_len > dest_len)
+	if (toCharSet->isMultiByte() && src_len > dest_len)
 	{
 		err(Arg::Gds(isc_arith_except) << Arg::Gds(isc_string_truncation) <<
 			Arg::Gds(isc_trunc_limits) << Arg::Num(dest_len) << Arg::Num(src_len));

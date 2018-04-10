@@ -67,9 +67,10 @@
 #endif
 #define DEBUG
 
-#define BUGCHECK(number)        ERR_bugcheck (number, __FILE__, __LINE__)
-#define CORRUPT(number)         ERR_corrupt (number)
-#define IBERROR(number)         ERR_error (number)
+#define BUGCHECK(number)		ERR_bugcheck(number, __FILE__, __LINE__)
+#define SOFT_BUGCHECK(number)	ERR_soft_bugcheck(number, __FILE__, __LINE__)
+#define CORRUPT(number)			ERR_corrupt(number)
+#define IBERROR(number)			ERR_error(number)
 
 
 #define BLKCHK(blk, type)       if (!blk->checkHandle()) BUGCHECK(147)
@@ -135,8 +136,6 @@ class PreparedStatement;
 class TraceManager;
 class MessageNode;
 
-// The database block, the topmost block in the metadata
-// cache for a database
 
 // Relation trigger definition
 
@@ -156,6 +155,8 @@ public:
 	Firebird::string	entryPoint;			// External trigger entrypoint
 	Firebird::string	extBody;			// External trigger body
 	ExtEngineManager::Trigger* extTrigger;	// External trigger
+	Nullable<bool> ssDefiner;
+	Firebird::MetaName	owner;				// Owner for SQL SECURITY
 
 	void compile(thread_db*);				// Ensure that trigger is compiled
 	void release(thread_db*);				// Try to free trigger request
@@ -172,6 +173,39 @@ public:
 };
 
 
+// Array of triggers (suppose separate arrays for triggers of different types)
+
+class TrigVector : public Firebird::ObjectsArray<Trigger>
+{
+public:
+	explicit TrigVector(Firebird::MemoryPool& pool)
+		: Firebird::ObjectsArray<Trigger>(pool),
+		  useCount(0)
+	{ }
+
+	TrigVector()
+		: Firebird::ObjectsArray<Trigger>(),
+		  useCount(0)
+	{ }
+
+	void addRef() const
+	{
+		++useCount;
+	}
+
+	void release() const;
+	void release(thread_db* tdbb) const;
+
+	~TrigVector()
+	{
+		fb_assert(useCount.value() == 0);
+	}
+
+private:
+	mutable Firebird::AtomicCounter useCount;
+};
+
+
 //
 // Flags to indicate normal internal requests vs. dyn internal requests
 //
@@ -185,7 +219,7 @@ class jrd_prc : public Routine
 {
 public:
 	const Format*	prc_record_format;
-	prc_t		prc_type;					// procedure type
+	prc_t			prc_type;					// procedure type
 
 	const ExtEngineManager::Procedure* getExternal() const { return prc_external; }
 	void setExternal(ExtEngineManager::Procedure* value) { prc_external = value; }
@@ -316,6 +350,110 @@ const USHORT WIN_garbage_collector	= 4;	// garbage collector's window
 const USHORT WIN_garbage_collect	= 8;	// scan left a page for garbage collector
 
 
+#ifdef USE_ITIMER
+class TimeoutTimer FB_FINAL :
+	public Firebird::RefCntIface<Firebird::ITimerImpl<TimeoutTimer, Firebird::CheckStatusWrapper> >
+{
+public:
+	explicit TimeoutTimer()
+		: m_started(0),
+		  m_expired(false),
+		  m_value(0),
+		  m_error(0)
+	{ }
+
+	// ITimer implementation
+	void handler();
+	int release();
+
+	bool expired() const
+	{
+		return m_expired;
+	}
+
+	unsigned int getValue() const
+	{
+		return m_value;
+	}
+
+	unsigned int getErrCode() const
+	{
+		return m_error;
+	}
+
+	// milliseconds left before timer expiration
+	unsigned int timeToExpire() const;
+
+	// evaluate expire timestamp using start timestamp
+	bool getExpireTimestamp(const ISC_TIMESTAMP start, ISC_TIMESTAMP& exp) const;
+
+	// set timeout value in milliseconds and secondary error code
+	void setup(unsigned int value, ISC_STATUS error)
+	{
+		m_value = value;
+		m_error = error;
+	}
+
+	void start();
+	void stop();
+
+private:
+	SINT64 m_started;
+	bool m_expired;
+	unsigned int m_value;	// milliseconds
+	ISC_STATUS m_error;
+};
+#else
+class TimeoutTimer : public Firebird::RefCounted
+{
+public:
+	explicit TimeoutTimer()
+		: m_start(0),
+		  m_value(0),
+		  m_error(0)
+	{ }
+
+	bool expired() const;
+
+	unsigned int getValue() const
+	{
+		return m_value;
+	}
+
+	unsigned int getErrCode() const
+	{
+		return m_error;
+	}
+
+	// milliseconds left before timer expiration
+	unsigned int timeToExpire() const;
+
+	// evaluate expire timestamp using start timestamp
+	bool getExpireTimestamp(const ISC_TIMESTAMP start, ISC_TIMESTAMP& exp) const;
+
+	// set timeout value in milliseconds and secondary error code
+	void setup(unsigned int value, ISC_STATUS error)
+	{
+		m_start = 0;
+		m_value = value;
+		m_error = error;
+	}
+
+	void start();
+	void stop();
+
+private:
+	SINT64 currTime() const
+	{
+		return fb_utils::query_performance_counter() * 1000 / fb_utils::query_performance_frequency();
+	}
+
+	SINT64 m_start;
+	unsigned int m_value;	// milliseconds
+	ISC_STATUS m_error;
+};
+#endif // USE_ITIMER
+
 // Thread specific database block
 
 // tdbb_flags
@@ -350,7 +488,6 @@ private:
 	jrd_tra*	transaction;
 	jrd_req*	request;
 	RuntimeStatistics *reqStat, *traStat, *attStat, *dbbStat;
-	thread_db	*priorThread, *nextThread;
 
 public:
 	explicit thread_db(FbStatusVector* status)
@@ -360,8 +497,6 @@ public:
 		  attachment(NULL),
 		  transaction(NULL),
 		  request(NULL),
-		  priorThread(NULL),
-		  nextThread(NULL),
 		  tdbb_status_vector(status),
 		  tdbb_quantum(QUANTUM),
 		  tdbb_flags(0),
@@ -486,9 +621,13 @@ public:
 			attStat->bumpRelValue(index, relation_id, delta);
 	}
 
-	ISC_STATUS checkCancelState();
+	ISC_STATUS checkCancelState(ISC_STATUS* secondary = NULL);
 	bool checkCancelState(bool punt);
 	bool reschedule(SLONG quantum, bool punt);
+	const TimeoutTimer* getTimeoutTimer() const
+	{
+		return tdbb_reqTimer;
+	}
 
 	void registerBdb(BufferDesc* bdb)
 	{
@@ -547,54 +686,6 @@ public:
 		return true;
 	}
 
-	void activate()
-	{
-		fb_assert(!priorThread && !nextThread);
-
-		if (database)
-		{
-			Firebird::SyncLockGuard sync(&database->dbb_threads_sync, Firebird::SYNC_EXCLUSIVE,
-										 "thread_db::activate");
-
-			if (database->dbb_active_threads)
-			{
-				fb_assert(!database->dbb_active_threads->priorThread);
-				database->dbb_active_threads->priorThread = this;
-				nextThread = database->dbb_active_threads;
-			}
-
-			database->dbb_active_threads = this;
-		}
-	}
-
-	void deactivate()
-	{
-		if (database)
-		{
-			Firebird::SyncLockGuard sync(&database->dbb_threads_sync, Firebird::SYNC_EXCLUSIVE,
-										 "thread_db::deactivate");
-
-			if (nextThread)
-			{
-				fb_assert(nextThread->priorThread == this);
-				nextThread->priorThread = priorThread;
-			}
-
-			if (priorThread)
-			{
-				fb_assert(priorThread->nextThread == this);
-				priorThread->nextThread = nextThread;
-			}
-			else
-			{
-				fb_assert(database->dbb_active_threads == this);
-				database->dbb_active_threads = nextThread;
-			}
-		}
-
-		priorThread = nextThread = NULL;
-	}
-
 	void resetStack()
 	{
 		if (tdbb_flags & TDBB_reset_stack)
@@ -605,6 +696,37 @@ public:
 #endif
 		}
 	}
+
+	class TimerGuard
+	{
+	public:
+		TimerGuard(thread_db* tdbb, TimeoutTimer* timer, bool autoStop)
+			: m_tdbb(tdbb),
+			  m_autoStop(autoStop && timer)
+		{
+			fb_assert(m_tdbb->tdbb_reqTimer == NULL);
+
+			m_tdbb->tdbb_reqTimer = timer;
+			if (timer && timer->expired())
+				m_tdbb->tdbb_quantum = 0;
+		}
+
+		~TimerGuard()
+		{
+			if (m_autoStop)
+				m_tdbb->tdbb_reqTimer->stop();
+
+			m_tdbb->tdbb_reqTimer = NULL;
+		}
+
+	private:
+		thread_db* m_tdbb;
+		bool m_autoStop;
+	};
+
+private:
+	Firebird::RefPtr<TimeoutTimer> tdbb_reqTimer;
+
 };
 
 class ThreadContextHolder
@@ -646,7 +768,7 @@ private:
 	ThreadContextHolder(const ThreadContextHolder&);
 	ThreadContextHolder& operator= (const ThreadContextHolder&);
 
-	FbLocalStatus localStatus;
+	Firebird::FbLocalStatus localStatus;
 	FbStatusVector* currentStatus;
 	thread_db context;
 };
@@ -686,7 +808,7 @@ public:
 	}
 
 private:
-	FbLocalStatus m_local_status;
+	Firebird::FbLocalStatus m_local_status;
 	thread_db* const m_tdbb;
 	FbStatusVector* const m_old_status;
 
@@ -829,23 +951,13 @@ namespace Jrd {
 	{
 	public:
 		explicit DatabaseContextHolder(thread_db* tdbb)
-			: Jrd::ContextPoolHolder(tdbb, tdbb->getDatabase()->dbb_permanent),
-			  savedTdbb(tdbb)
-		{
-			savedTdbb->activate();
-		}
-
-		~DatabaseContextHolder()
-		{
-			savedTdbb->deactivate();
-		}
+			: Jrd::ContextPoolHolder(tdbb, tdbb->getDatabase()->dbb_permanent)
+		{}
 
 	private:
 		// copying is prohibited
 		DatabaseContextHolder(const DatabaseContextHolder&);
 		DatabaseContextHolder& operator=(const DatabaseContextHolder&);
-
-		thread_db* const savedTdbb;
 	};
 
 	class BackgroundContextHolder : public ThreadContextHolder, public DatabaseContextHolder,

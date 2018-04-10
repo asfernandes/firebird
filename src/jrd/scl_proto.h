@@ -33,7 +33,8 @@
 
 struct dsc;
 
-void SCL_check_access(Jrd::thread_db*, const Jrd::SecurityClass*, SLONG, SLONG, const Firebird::MetaName&,
+void SCL_check_access(Jrd::thread_db*, const Jrd::SecurityClass*, const Firebird::MetaName& userName,
+					  SLONG, const Firebird::MetaName&,
 					  Jrd::SecurityClass::flags_t, SLONG type, bool recursive, const Firebird::MetaName&,
 					  const Firebird::MetaName& = "");
 void SCL_check_create_access(Jrd::thread_db*, int type);
@@ -63,7 +64,7 @@ USHORT SCL_convert_privilege(Jrd::thread_db* tdbb, Jrd::jrd_tra* transaction, co
 namespace Jrd {
 typedef Firebird::Array<UCHAR> Acl;
 }
-void SCL_move_priv(Jrd::SecurityClass::flags_t, Jrd::Acl&);
+bool SCL_move_priv(Jrd::SecurityClass::flags_t, Jrd::Acl&);
 
 
 #endif // JRD_SCL_PROTO_H
