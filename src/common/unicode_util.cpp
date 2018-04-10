@@ -102,9 +102,13 @@ public:
 			symbol.printf(*p, name, majorVersion, minorVersion);
 			module->findSymbol(symbol, ptr);
 			if (ptr)
+			{
+				printf("getEntryPoint: %s - ok\n", name);
 				return;
+			}
 		}
 
+		printf("getEntryPoint: %s - error %s\n", name, dlerror());
 		(Arg::Gds(isc_icu_entrypoint) << name).raise();
 	}
 
