@@ -40,6 +40,7 @@
 #include "../common/classes/stack.h"
 #include "../common/classes/timestamp.h"
 #include "../common/ThreadStart.h"
+#include "../common/TimeZoneUtil.h"
 
 #include "../jrd/EngineInterface.h"
 
@@ -336,6 +337,7 @@ public:
 	ULONG att_ext_call_depth;				// external connection call depth, 0 for user attachment
 	TraceManager* att_trace_manager;		// Trace API manager
 
+	Firebird::TimeZoneUtil::Bind att_timezone_bind;
 	USHORT att_original_timezone;
 	USHORT att_current_timezone;
 
