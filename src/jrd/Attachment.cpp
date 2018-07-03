@@ -403,7 +403,7 @@ void Jrd::Attachment::resetSession(thread_db* tdbb, jrd_tra** traHandle)
 				err = true;
 		}
 
-		// Cannot reset user session 
+		// Cannot reset user session
 		// There are open transactions (@1 active)
 		if (err)
 		{
@@ -447,6 +447,9 @@ void Jrd::Attachment::resetSession(thread_db* tdbb, jrd_tra** traHandle)
 	// reset DecFloat
 	att_dec_status = DecimalStatus::DEFAULT;
 	att_dec_binding = DecimalBinding::DEFAULT;
+
+	// reset time zone
+	att_current_timezone = att_original_timezone;
 
 	// reset timeouts
 	setIdleTimeout(0);
