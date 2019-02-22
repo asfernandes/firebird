@@ -5358,7 +5358,7 @@ tran_option($setTransactionNode)
 	| NO WAIT
 		{ setClause($setTransactionNode->wait, "[NO] WAIT", false); }
 	// isolation mode
-	| isolation_mode
+	| isolation_mode($setTransactionNode)
 		{ setClause($setTransactionNode->isoLevel, "ISOLATION LEVEL", $1); }
 	// misc options
 	| NO AUTO UNDO
@@ -5378,24 +5378,38 @@ tran_option($setTransactionNode)
 		restr_list($setTransactionNode)
 	;
 
-%type <uintVal>	isolation_mode
-isolation_mode
-	: ISOLATION LEVEL iso_mode	{ $$ = $3;}
+%type <uintVal>	isolation_mode(<setTransactionNode>)
+isolation_mode($setTransactionNode)
+	: ISOLATION LEVEL iso_mode($setTransactionNode)	{ $$ = $3;}
 	| iso_mode
 	;
 
-%type <uintVal>	iso_mode
-iso_mode
-	: snap_shot
+%type <uintVal>	iso_mode(<setTransactionNode>)
+iso_mode($setTransactionNode)
+	: snap_shot($setTransactionNode)	{ $$ = $1; }
 	| READ UNCOMMITTED version_mode		{ $$ = $3; }
 	| READ COMMITTED version_mode		{ $$ = $3; }
 	;
 
-%type <uintVal>	snap_shot
-snap_shot
-	: SNAPSHOT					{ $$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY; }
-	| SNAPSHOT TABLE			{ $$ = SetTransactionNode::ISO_LEVEL_CONSISTENCY; }
-	| SNAPSHOT TABLE STABILITY	{ $$ = SetTransactionNode::ISO_LEVEL_CONSISTENCY; }
+%type <uintVal>	snap_shot(<setTransactionNode>)
+snap_shot($setTransactionNode)
+	: SNAPSHOT
+		{ $$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY; }
+	| SNAPSHOT SHARED FROM transaction_number
+		{
+			setClause($setTransactionNode->sharedSnapshotNumber, "SHARED FROM", (TraNumber) $4);
+			$$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY;
+		}
+	| SNAPSHOT TABLE
+		{ $$ = SetTransactionNode::ISO_LEVEL_CONSISTENCY; }
+	| SNAPSHOT TABLE STABILITY
+		{ $$ = SetTransactionNode::ISO_LEVEL_CONSISTENCY; }
+	;
+
+%type <int64Val> transaction_number
+transaction_number
+	: NUMBER		{ $$ = $1; }
+	| NUMBER64BIT	{ $$ = $1.number; }
 	;
 
 %type <uintVal>	version_mode

@@ -760,7 +760,7 @@ void TipCache::remapSnapshots(bool sync)
 
 
 
-SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, CommitNumber *commitNumber_out)
+SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, CommitNumber& commitNumber)
 {
 	// Can only be called on initialized TipCache
 	fb_assert(m_tpcHeader);
@@ -778,10 +778,12 @@ SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, 
 	SnapshotList* snapshots = m_snapshots->getHeader();
 
 	// Store snapshot commit number and return handle
-	SnapshotData *slot = snapshots->slots + slotNumber;
+	SnapshotData* slot = snapshots->slots + slotNumber;
 
-	*commitNumber_out = m_tpcHeader->getHeader()->latest_commit_number.load(std::memory_order_acquire);
-	slot->snapshot.store(*commitNumber_out, std::memory_order_release);
+	if (commitNumber == 0)
+		commitNumber = m_tpcHeader->getHeader()->latest_commit_number.load(std::memory_order_acquire);
+
+	slot->snapshot.store(commitNumber, std::memory_order_release);
 
 	// Only assign attachment_id after we completed all other work
 	slot->attachment_id.store(attachmentId, std::memory_order_release);
