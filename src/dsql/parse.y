@@ -5397,7 +5397,7 @@ snap_shot($setTransactionNode)
 		{ $$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY; }
 	| SNAPSHOT SHARED FROM transaction_number
 		{
-			setClause($setTransactionNode->sharedSnapshotNumber, "SHARED FROM", (TraNumber) $4);
+			setClause($setTransactionNode->sharedSnapshotNumber, "SHARED FROM", (CommitNumber) $4);
 			$$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY;
 		}
 	| SNAPSHOT TABLE

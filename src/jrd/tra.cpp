@@ -1285,15 +1285,6 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 
 	++transaction->tra_use_count;
 
-	if (transaction->tra_snapshot_cn_lock)
-	{
-		// Ensure nobody is trying to depend on that transaction as base.
-		LCK_convert(tdbb, transaction->tra_snapshot_cn_lock, LCK_write, LCK_WAIT);
-
-		LCK_write_data(tdbb, transaction->tra_snapshot_cn_lock, 0);
-		LCK_release(tdbb, transaction->tra_snapshot_cn_lock);
-	}
-
 	if (transaction->tra_lock)
 		LCK_release(tdbb, transaction->tra_lock);
 
@@ -3223,9 +3214,9 @@ static void transaction_options(thread_db* tdbb,
 				}
 
 				shared_snapshot = true;
-				transaction->tra_shared_snapshot = isc_portable_integer(tpb, len);
+				transaction->tra_snapshot_number = isc_portable_integer(tpb, len);
 
-				if (transaction->tra_shared_snapshot == 0)
+				if (transaction->tra_snapshot_number == 0)
 				{
 					ERR_post(
 						Arg::Gds(isc_bad_tpb_content) <<
@@ -3394,35 +3385,6 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 		ERR_post(Arg::Gds(isc_lock_conflict));
 	}
 
-	Lock snapshotLock(tdbb, sizeof(CommitNumber), LCK_tra_snapshot_cn, trans);
-
-	if (trans->tra_shared_snapshot != 0)
-	{
-		snapshotLock.setKey(trans->tra_shared_snapshot);
-
-		const bool error =
-			trans->tra_shared_snapshot == number ||
-			(trans->tra_flags & TRA_read_committed) ||
-			// Ensure the other transaction is snapshot and does not finalize until we create our snapshot.
-			!LCK_lock(tdbb, &snapshotLock, LCK_read, LCK_WAIT) ||
-			// Read the transaction commit number
-			(trans->tra_snapshot_number = (CommitNumber) LCK_read_data(tdbb, &snapshotLock)) == 0;
-
-		if (error)
-		{
-			LCK_release(tdbb, &snapshotLock);
-			LCK_release(tdbb, lock);
-
-#ifndef SUPERSERVER_V2
-			if (!dbb->readOnly())
-				CCH_RELEASE(tdbb, &window);
-#endif
-
-			//// FIXME: message code
-			ERR_post(Arg::Gds(isc_random) << "Transaction used in SHARED SNAPSHOT is not an active snapshot transaction");
-		}
-	}
-
 	// Link the transaction to the attachment block before releasing
 	// header page for handling signals.
 
@@ -3448,22 +3410,15 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 
 		if (!(trans->tra_flags & TRA_read_committed))
 		{
-			trans->tra_snapshot_handle = dbb->dbb_tip_cache->beginSnapshot(
-				tdbb, attachment->att_attachment_id, trans->tra_snapshot_number);
-
-			if (trans->tra_shared_snapshot != 0)
-				LCK_release(tdbb, &snapshotLock);
-
-			trans->tra_snapshot_cn_lock = FB_NEW_RPT(*tdbb->getDefaultPool(), 0) Lock(
-				tdbb, sizeof(CommitNumber), LCK_tra_snapshot_cn, trans);
-
-			trans->tra_snapshot_cn_lock->setKey(number);
-			trans->tra_snapshot_cn_lock->lck_data = trans->tra_snapshot_number;
-
-			if (!LCK_lock(tdbb, trans->tra_snapshot_cn_lock, LCK_read, LCK_WAIT))
+			try
+			{
+				trans->tra_snapshot_handle = dbb->dbb_tip_cache->beginSnapshot(
+					tdbb, attachment->att_attachment_id, trans->tra_snapshot_number);
+			}
+			catch (const Firebird::Exception&)
 			{
 				LCK_release(tdbb, lock);
-				ERR_post(Arg::Gds(isc_lock_conflict));
+				throw;
 			}
 		}
 

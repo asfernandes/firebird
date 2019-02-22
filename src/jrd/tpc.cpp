@@ -772,6 +772,25 @@ SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, 
 	// Remap snapshot list if it has been grown by someone else
 	remapSnapshots(false);
 
+	if (commitNumber != 0)
+	{
+		SnapshotList* snapshots = m_snapshots->getHeader();
+		ULONG slotsUsed = snapshots->slots_used.load(std::memory_order_relaxed);
+		bool found = false;
+
+		for (SnapshotHandle slotNumber = 0; slotNumber < slotsUsed; ++slotNumber)
+		{
+			if (snapshots->slots[slotNumber].snapshot.load(std::memory_order_relaxed) == commitNumber)
+			{
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+			ERR_post(Arg::Gds(isc_random) << "Base snapshot does not exist");
+	}
+
 	SnapshotHandle slotNumber = allocateSnapshotSlot();
 
 	// Note, that allocateSnapshotSlot might remap memory and thus invalidate pointers

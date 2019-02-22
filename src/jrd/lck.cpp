@@ -578,7 +578,6 @@ static lck_owner_t get_owner_type(enum lck_t lock_type)
 	case LCK_rel_gc:
 	case LCK_record_gc:
 	case LCK_alter_database:
-	case LCK_tra_snapshot_cn:
 		owner_type = LCK_OWNER_attachment;
 		break;
 

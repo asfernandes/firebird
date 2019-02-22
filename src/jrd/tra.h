@@ -261,7 +261,6 @@ public:
 	TraNumber tra_oldest_active;		// record versions older than this can be
 										// gargage-collected by this tx
 	TraNumber tra_att_oldest_active;	// oldest active transaction in the same attachment
-	TraNumber tra_shared_snapshot;		// base transaction or 0 if has no base
 	jrd_tra* tra_next;					// next transaction in attachment
 	MemoryPool* const tra_pool;			// pool for transaction
 	Firebird::MemoryStats	tra_memory_stats;
@@ -271,7 +270,6 @@ public:
 	ReplBlobMap tra_repl_blobs;			// map of blob IDs replicated in this transaction
 	ArrayField*	tra_arrays;				// Linked list of active arrays
 	Lock*		tra_lock;				// lock for transaction
-	Lock*		tra_snapshot_cn_lock;	// snapshot CN for sharing snapshot
 	Lock*		tra_alter_db_lock;		// lock for ALTER DATABASE statement(s)
 	vec<Lock*>*			tra_relation_locks;	// locks for relations
 	TransactionBitmap*	tra_commit_sub_trans;	// committed sub-transactions

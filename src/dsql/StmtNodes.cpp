@@ -8194,8 +8194,8 @@ SetTransactionNode* SetTransactionNode::dsqlPass(DsqlCompilerScratch* dsqlScratc
 	if (sharedSnapshotNumber.specified)
 	{
 		dsqlScratch->appendUChar(isc_tpb_shared_snapshot);
-		static_assert(sizeof(TraNumber) == sizeof(FB_UINT64), "sizeof(TraNumber) == sizeof(FB_UINT64)");
-		dsqlScratch->appendUChar(sizeof(TraNumber));
+		static_assert(sizeof(TraNumber) == sizeof(FB_UINT64), "sizeof(CommitNumber) == sizeof(FB_UINT64)");
+		dsqlScratch->appendUChar(sizeof(CommitNumber));
 		dsqlScratch->appendUInt64(sharedSnapshotNumber.value);
 	}
 
