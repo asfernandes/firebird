@@ -759,7 +759,6 @@ void TipCache::remapSnapshots(bool sync)
 }
 
 
-
 SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, CommitNumber& commitNumber)
 {
 	// Can only be called on initialized TipCache
@@ -780,7 +779,8 @@ SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, 
 
 		for (SnapshotHandle slotNumber = 0; slotNumber < slotsUsed; ++slotNumber)
 		{
-			if (snapshots->slots[slotNumber].snapshot.load(std::memory_order_relaxed) == commitNumber)
+			if (snapshots->slots[slotNumber].attachment_id.load(std::memory_order_relaxed) != 0 &&
+				snapshots->slots[slotNumber].snapshot.load(std::memory_order_relaxed) == commitNumber)
 			{
 				found = true;
 				break;
