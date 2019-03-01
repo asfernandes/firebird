@@ -1166,7 +1166,7 @@ void INF_transaction_info(const jrd_tra* transaction,
 			memcpy(buffer, transaction->tra_attachment->att_database->dbb_database_name.c_str(), length);
 			break;
 
-		case fb_info_tra_snapshot_cn:
+		case fb_info_tra_snapshot_number:
 			length = INF_convert(static_cast<SINT64>(transaction->tra_snapshot_number), buffer);
 			break;
 
