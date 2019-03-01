@@ -335,7 +335,7 @@ using namespace Firebird;
 %token <stringPtr> FLOAT_NUMBER DECIMAL_NUMBER LIMIT64_INT
 %token <lim64ptr> LIMIT64_NUMBER
 %token <metaNamePtr> SYMBOL
-%token <int32Val> NUMBER
+%token <int32Val> NUMBER32BIT
 
 %token <intlStringPtr> STRING
 %token <metaNamePtr> INTRODUCER
@@ -5408,7 +5408,7 @@ snap_shot($setTransactionNode)
 
 %type <int64Val> snapshot_number
 snapshot_number
-	: NUMBER		{ $$ = $1; }
+	: NUMBER32BIT	{ $$ = $1; }
 	| NUMBER64BIT	{ $$ = $1.number; }
 	;
 
@@ -7385,7 +7385,7 @@ u_numeric_constant
 
 %type <valueExprNode> ul_numeric_constant
 ul_numeric_constant
-	: NUMBER
+	: NUMBER32BIT
 		{ $$ = MAKE_const_slong($1); }
 	| FLOAT_NUMBER
 		{ $$ = MAKE_constant($1->c_str(), CONSTANT_DOUBLE); }
@@ -7525,7 +7525,7 @@ signed_short_integer
 
 %type <int32Val> nonneg_short_integer
 nonneg_short_integer
-	: NUMBER
+	: NUMBER32BIT
 		{
 			if ($1 > SHRT_POS_MAX)
 				yyabandon(YYPOSNARG(1), -842, isc_expec_short);	// Short integer expected
@@ -7536,7 +7536,7 @@ nonneg_short_integer
 
 %type <int32Val> neg_short_integer
 neg_short_integer
-	: NUMBER
+	: NUMBER32BIT
 		{
 			if ($1 > SHRT_NEG_MAX)
 				yyabandon(YYPOSNARG(1), -842, isc_expec_short);	// Short integer expected
@@ -7558,7 +7558,7 @@ pos_short_integer
 
 %type <int32Val> unsigned_short_integer
 unsigned_short_integer
-	: NUMBER
+	: NUMBER32BIT
 		{
 			if ($1 > SHRT_UNSIGNED_MAX)
 				yyabandon(YYPOSNARG(1), -842, isc_expec_ushort);	// Unsigned short integer expected
@@ -7575,7 +7575,7 @@ signed_long_integer
 
 %type <int32Val> long_integer
 long_integer
-	: NUMBER	{ $$ = $1;}
+	: NUMBER32BIT	{ $$ = $1;}
 	;
 
 
@@ -8810,6 +8810,7 @@ non_reserved_word
 	| NATIVE
 	| NORMALIZE_DECFLOAT
 	| NTILE
+	| NUMBER
 	| OLDEST
 	| OTHERS
 	| OVERRIDING
