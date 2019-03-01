@@ -5395,9 +5395,9 @@ iso_mode($setTransactionNode)
 snap_shot($setTransactionNode)
 	: SNAPSHOT
 		{ $$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY; }
-	| SNAPSHOT SHARED FROM transaction_number
+	| SNAPSHOT AT NUMBER snapshot_number
 		{
-			setClause($setTransactionNode->sharedSnapshotNumber, "SHARED FROM", (CommitNumber) $4);
+			setClause($setTransactionNode->atSnapshotNumber, "SNAPSHOT AT NUMBER", (CommitNumber) $4);
 			$$ = SetTransactionNode::ISO_LEVEL_CONCURRENCY;
 		}
 	| SNAPSHOT TABLE
@@ -5406,8 +5406,8 @@ snap_shot($setTransactionNode)
 		{ $$ = SetTransactionNode::ISO_LEVEL_CONSISTENCY; }
 	;
 
-%type <int64Val> transaction_number
-transaction_number
+%type <int64Val> snapshot_number
+snapshot_number
 	: NUMBER		{ $$ = $1; }
 	| NUMBER64BIT	{ $$ = $1.number; }
 	;

@@ -8191,12 +8191,12 @@ SetTransactionNode* SetTransactionNode::dsqlPass(DsqlCompilerScratch* dsqlScratc
 	for (RestrictionOption** i = reserveList.begin(); i != reserveList.end(); ++i)
 		genTableLock(dsqlScratch, **i, lockLevel);
 
-	if (sharedSnapshotNumber.specified)
+	if (atSnapshotNumber.specified)
 	{
-		dsqlScratch->appendUChar(isc_tpb_shared_snapshot);
-		static_assert(sizeof(TraNumber) == sizeof(FB_UINT64), "sizeof(CommitNumber) == sizeof(FB_UINT64)");
+		dsqlScratch->appendUChar(isc_tpb_at_snapshot_number);
+		static_assert(sizeof(CommitNumber) == sizeof(FB_UINT64), "sizeof(CommitNumber) == sizeof(FB_UINT64)");
 		dsqlScratch->appendUChar(sizeof(CommitNumber));
-		dsqlScratch->appendUInt64(sharedSnapshotNumber.value);
+		dsqlScratch->appendUInt64(atSnapshotNumber.value);
 	}
 
 	if (dsqlScratch->getBlrData().getCount() > 1)	// 1 -> isc_tpb_version1

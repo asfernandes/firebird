@@ -2754,7 +2754,7 @@ static void transaction_options(thread_db* tdbb,
 				ERR_post(
 					Arg::Gds(isc_bad_tpb_content) <<
 					Arg::Gds(isc_tpb_conflicting_options) <<
-						Arg::Str("isc_tpb_consistency") << Arg::Str("isc_tpb_shared_snapshot"));
+						Arg::Str("isc_tpb_consistency") << Arg::Str("isc_tpb_at_snapshot_number"));
 			}
 
 			transaction->tra_flags |= TRA_degree3;
@@ -2780,7 +2780,7 @@ static void transaction_options(thread_db* tdbb,
 				ERR_post(
 					Arg::Gds(isc_bad_tpb_content) <<
 					Arg::Gds(isc_tpb_conflicting_options) <<
-						Arg::Str("isc_tpb_read_committed") << Arg::Str("isc_tpb_shared_snapshot"));
+						Arg::Str("isc_tpb_read_committed") << Arg::Str("isc_tpb_at_snapshot_number"));
 			}
 
 			transaction->tra_flags &= ~TRA_degree3;
@@ -3163,9 +3163,9 @@ static void transaction_options(thread_db* tdbb,
 			}
 			break;
 
-		case isc_tpb_shared_snapshot:
+		case isc_tpb_at_snapshot_number:
 			{
-				const char* option_name = "isc_tpb_shared_snapshot";
+				const char* option_name = "isc_tpb_at_snapshot_number";
 
 				if (shared_snapshot)
 				{
