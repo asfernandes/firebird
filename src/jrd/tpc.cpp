@@ -788,7 +788,7 @@ SnapshotHandle TipCache::beginSnapshot(thread_db* tdbb, AttNumber attachmentId, 
 		}
 
 		if (!found)
-			ERR_post(Arg::Gds(isc_random) << "Base snapshot does not exist");
+			ERR_post(Arg::Gds(isc_tra_snapshot_does_not_exist));
 	}
 
 	SnapshotHandle slotNumber = allocateSnapshotSlot();
