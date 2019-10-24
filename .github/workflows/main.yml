@@ -42,7 +42,7 @@ jobs:
         tmate -S /tmp/tmate.sock wait tmate-ready
         tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
         tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
-        wait 1000000
+        sleep 1000000
         brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
         ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
