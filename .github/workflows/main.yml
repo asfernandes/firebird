@@ -37,8 +37,7 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        npm i -g ngrok
-        ngrok tcp 22
+        curl https://ipinfo.io/ip
         #echo x0
         #brew install tmux tmate reattach-to-user-namespace
         #echo x0
