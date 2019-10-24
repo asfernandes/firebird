@@ -40,8 +40,8 @@ jobs:
         #brew install icu4c
         #brew link icu4c --force
         #brew info icu4c
-        brew install libtommath
-        brew install libtomcrypt
+        #brew install libtommath
+        #brew install libtomcrypt
         mkdir extern/icu-macos
         cd extern/icu-macos
         wget http://download.icu-project.org/files/icu4c/54.1/icu4c-54_1-src.tgz
@@ -62,8 +62,8 @@ jobs:
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
-        #./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
-        ./autogen.sh
+        ./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
+        #./autogen.sh
         make -j4
         make dist
         find gen
