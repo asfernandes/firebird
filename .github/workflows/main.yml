@@ -34,7 +34,7 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        brew install automake libtool icu4c@54.0
+        brew install automake libtool icu4c
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
         ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
         brew link icu4c --force
@@ -50,7 +50,7 @@ jobs:
         export PATH="/usr/local/opt/icu4c/sbin:$PATH"
         export LDFLAGS="-L/usr/local/opt/icu4c/lib"
         export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
-        export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
+        export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++ -std=c++11"
         #./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
         ./autogen.sh
         make -j4
