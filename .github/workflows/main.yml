@@ -45,11 +45,12 @@ jobs:
         #tmate -S /tmp/tmate.sock wait tmate-ready
         sleep 10
         echo x3
+        sleep 10
         #tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
         echo x4
         tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
         echo x5
-        sleep 120
+        sleep 121
         echo x6
         brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
