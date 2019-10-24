@@ -34,23 +34,34 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        brew install automake libtool icu4c
+        brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
         ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
-        brew link icu4c --force
-        brew info icu4c
+        #brew install icu4c
+        #brew link icu4c --force
+        #brew info icu4c
         brew install libtommath
         brew install libtomcrypt
+        mkdir extern/icu-macos
+        cd extern/icu-macos
+        wget http://download.icu-project.org/files/icu4c/54.1/icu4c-54_1-src.tgz
+        tar xzvf icu4c-54_1-src.tgz
+        cd icu/source
+        ./runConfigureICU MacOSX
+        make -j4
+        sudo make install
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
         env
-        export PATH="/usr/local/opt/icu4c/bin:$PATH"
-        export PATH="/usr/local/opt/icu4c/sbin:$PATH"
-        export LDFLAGS="-L/usr/local/opt/icu4c/lib"
-        export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
-        export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++ -std=c++11"
+        #export PATH="/usr/local/opt/icu4c/bin:$PATH"
+        #export PATH="/usr/local/opt/icu4c/sbin:$PATH"
+        #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
+        #export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
+        #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
+        export CPPFLAGS="-stdlib=libc++"
+        export CXX="g++ -stdlib=libc++"
         #./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
         ./autogen.sh
         make -j4
