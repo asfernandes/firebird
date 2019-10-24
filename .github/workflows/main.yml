@@ -63,11 +63,10 @@ jobs:
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
         #export MATHLIB=-ltommath
-        ./autogen.sh --with-builtin-tommath
-        #./autogen.sh
-        make -j4
-        make dist
-        find gen
+        ./autogen.sh --with-builtin-tommath || (echo 1 && find gen/Release/firebird/lib && echo 2 && find extern/libtommath/.libs/)
+        #make -j4
+        #make dist
+        #find gen
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
