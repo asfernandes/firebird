@@ -1,0 +1,86 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        #os: [ubuntu-16.04, windows-2016]
+        #os: [windows-2016, macOS-latest]
+        os: [macOS-latest]
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        fetch-depth: 10
+
+    - name: Prepare (Linux)
+      if: matrix.os == 'ubuntu-16.04'
+      run: |
+        sudo apt-get install libtool-bin libtommath0 libtommath-dev libicu-dev zlib1g-dev
+
+    - name: Build (Linux)
+      if: matrix.os == 'ubuntu-16.04'
+      run: |
+        ./autogen.sh --enable-binreloc --with-builtin-tomcrypt --prefix=/opt/firebird
+        make -j4
+        make dist
+        tar xzvf gen/Firebird-[0-9]*.tar.gz
+        (cd Firebird-[0-9]*; sudo ./install.sh -silent)
+
+    - name: Prepare (MacOS)
+      if: matrix.os == 'macOS-latest'
+      run: |
+        brew install automake libtool icu4c
+        ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
+        ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
+        brew link icu4c --force
+        brew info icu4c
+        brew install libtommath
+        brew install libtomcrypt
+
+    - name: Build (MacOS)
+      if: matrix.os == 'macOS-latest'
+      run: |
+        env
+        export PATH="/usr/local/opt/icu4c/bin:$PATH"
+        export PATH="/usr/local/opt/icu4c/sbin:$PATH"
+        export LDFLAGS="-L/usr/local/opt/icu4c/lib"
+        export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
+        export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
+        #./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
+        ./autogen.sh
+        make -j4
+        make dist
+        find gen
+
+    - name: Prepare (Windows)
+      if: matrix.os == 'windows-2016'
+      shell: cmd
+      run: |
+        for /r %%i in (*.bat) do unix2dos "%%i"
+
+    - name: Build (Windows)
+      if: matrix.os == 'windows-2016'
+      shell: cmd
+      run: |
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64
+        cd builds\win32
+        run_all.bat JUSTBUILD
+
+    - name: Upload (Linux)
+      if: matrix.os == 'ubuntu-16.04'
+      uses: actions/upload-artifact@master
+      with:
+        name: firebird.tar.gz
+        path: gen/Firebird-[0-9]*.tar.gz
+
+    - name: Upload (Windows)
+      if: matrix.os == 'windows-2016'
+      uses: actions/upload-artifact@master
+      with:
+        name: firebird.zip
+        path: output_x64
