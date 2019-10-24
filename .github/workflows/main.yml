@@ -62,7 +62,7 @@ jobs:
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
-        export MATHLIB=-ltommath
+        #export MATHLIB=-ltommath
         ./autogen.sh --with-builtin-tommath
         #./autogen.sh
         make -j4
