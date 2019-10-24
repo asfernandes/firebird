@@ -17,8 +17,8 @@ jobs:
       with:
         fetch-depth: 10
 
-    - name: Debug session
-      uses: uavos/action-tmate@v1
+    #- name: Debug session
+    #  uses: uavos/action-tmate@v1
 
     - name: Prepare (Linux)
       if: matrix.os == 'ubuntu-16.04'
@@ -37,6 +37,12 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
+        brew install tmux tmate reattach-to-user-namespace
+        tmate -S /tmp/tmate.sock new-session -d
+        tmate -S /tmp/tmate.sock wait tmate-ready
+        tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+        tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+        wait 1000000
         brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
         ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
