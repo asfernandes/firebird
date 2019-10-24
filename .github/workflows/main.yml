@@ -62,7 +62,7 @@ jobs:
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
-        ./autogen.sh --with-builtin-tomcrypt --with-builtin-tommath
+        ./autogen.sh --with-builtin-tommath
         #./autogen.sh
         make -j4
         make dist
