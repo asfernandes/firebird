@@ -17,6 +17,9 @@ jobs:
       with:
         fetch-depth: 10
 
+    - name: Debug session
+      uses: uavos/action-tmate@v1
+
     - name: Prepare (Linux)
       if: matrix.os == 'ubuntu-16.04'
       run: |
