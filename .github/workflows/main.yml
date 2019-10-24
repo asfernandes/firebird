@@ -51,7 +51,7 @@ jobs:
         tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
         sleep 10
         echo x5
-        tmate show-messages
+        tmate -S /tmp/tmate.sock show-messages
         echo x6
         sleep 121
         echo x7
