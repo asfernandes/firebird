@@ -47,9 +47,9 @@ jobs:
         echo x3
         #tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
         echo x4
-        #tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+        tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
         echo x5
-        #sleep 1000000
+        sleep 120
         echo x6
         brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
