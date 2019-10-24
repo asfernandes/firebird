@@ -42,7 +42,8 @@ jobs:
         echo x1
         tmate -S /tmp/tmate.sock new-session -d
         echo x2
-        tmate -S /tmp/tmate.sock wait tmate-ready
+        #tmate -S /tmp/tmate.sock wait tmate-ready
+        sleep 10
         echo x3
         #tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
         echo x4
