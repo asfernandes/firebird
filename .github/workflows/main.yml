@@ -37,12 +37,19 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
+        echo x0
         brew install tmux tmate reattach-to-user-namespace
+        echo x1
         tmate -S /tmp/tmate.sock new-session -d
+        echo x2
         tmate -S /tmp/tmate.sock wait tmate-ready
+        echo x3
         tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+        echo x4
         tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+        echo x5
         sleep 1000000
+        echo x6
         brew install automake libtool
         ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
         ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
