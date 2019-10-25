@@ -253,7 +253,7 @@ LIBIBUTIL_SO = $(LIB)/$(IbUtilLibraryName)
 # Own tommath support
 TOMMATH=$(ROOT)/extern/libtommath
 TOMMATH_INC=$(TOMMATH)
-TOMMATH_SO=$(TOMMATH)/.libs/libtommath.so
+TOMMATH_SO=$(TOMMATH)/.libs/libtommath.dylib
 TOMMATH_VER=0
 
 # LINKER OPTIONS

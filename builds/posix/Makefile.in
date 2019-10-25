@@ -130,9 +130,9 @@ ifeq ($(TOMBUILD_FLG),Y)
 	echo $(LIBTOOL)
 	$(MAKE) -C $(ROOT)/extern/libtommath -f makefile.shared LIBTOOL=$(LIBTOOL)
 	ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)/
-	ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)/libtommath.dylib.0
+	#ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)/libtommath.dylib.0
 	ln -sf $(TOMMATH_SO) $(LIB)/
-	ln -sf $(TOMMATH_SO) $(LIB)/libtommath.dylib
+	#ln -sf $(TOMMATH_SO) $(LIB)/libtommath.dylib
 	echo 111
 	ls -l $(TOMMATH)/.libs/
 	echo 222
