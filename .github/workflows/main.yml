@@ -75,7 +75,7 @@ jobs:
         ./runConfigureICU MacOSX
         make -j4
         sudo make install
-        objdump -T /usr/local/lib/libicuuc.dylib
+        symbols /usr/local/lib/libicuuc.dylib
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
