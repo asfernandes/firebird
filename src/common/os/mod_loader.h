@@ -109,11 +109,13 @@ public:
 	**/
 	static Module* fixAndLoadModule(ISC_STATUS* status, const Firebird::PathName& modName)
 	{
+		printf("fixAndLoadModule1: %s\n", modName.c_str());	//// FIXME:
 		Module* mod = loadModule(NULL, modName);
 		if (!mod)
 		{
 			Firebird::PathName fixed(modName);
 			doctorModuleExtension(fixed);
+			printf("fixAndLoadModule2: %s\n", fixed.c_str());	//// FIXME:
 			mod = loadModule(status, fixed);
 		}
 		return mod;

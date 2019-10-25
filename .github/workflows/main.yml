@@ -90,10 +90,7 @@ jobs:
         #export MATHLIB=-ltommath
         ./autogen.sh --with-builtin-tommath
         make -j4
-        echo 1 && find gen/Release/firebird/lib
-        echo 2 && find extern/libtommath/.libs/
         #make dist
-        #find gen
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
