@@ -88,8 +88,8 @@ jobs:
         #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
         #export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
-        #export CPPFLAGS="-stdlib=libc++"
-        #export CXX="g++ -stdlib=libc++"
+        export CPPFLAGS="-stdlib=libc++"
+        export CXX="g++ -stdlib=libc++"
         export DYLD_LIBRARY_PATH=/usr/local/lib:$DYLD_LIBRARY_PATH
         export DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:$DYLD_FALLBACK_LIBRARY_PATH
         ./autogen.sh --with-builtin-tommath
