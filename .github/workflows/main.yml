@@ -37,7 +37,7 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        curl https://ipinfo.io/ip
+        #curl https://ipinfo.io/ip
         #echo x0
         #brew install tmux tmate reattach-to-user-namespace
         #echo x0
@@ -88,7 +88,9 @@ jobs:
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
         #export MATHLIB=-ltommath
-        ./autogen.sh --with-builtin-tommath || (echo 1 && find gen/Release/firebird/lib && echo 2 && find extern/libtommath/.libs/)
+        ./autogen.sh --with-builtin-tommath
+		echo 1 && find gen/Release/firebird/lib
+		echo 2 && find extern/libtommath/.libs/
         #make -j4
         #make dist
         #find gen
