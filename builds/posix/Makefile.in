@@ -138,7 +138,8 @@ ifeq ($(TOMBUILD_FLG),Y)
 	ls -l $(TOMMATH)/.libs/
 	echo 222
 	ls -l $(LIB)/
-	cp $(TOMMATH)/.libs/libtommath.0.dylib /usr/local/lib/
+	#cp $(TOMMATH)/.libs/libtommath.0.dylib /usr/local/lib/
+	install_name_tool -id "$(LIB)/libtommath.0.dylib" $(TOMMATH)/.libs/libtommath.0.dylib
 endif
 
 ifeq ($(STD_EDITLINE),false)

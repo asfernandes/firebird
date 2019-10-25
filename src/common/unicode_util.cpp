@@ -113,7 +113,9 @@ public:
 	int minorVersion;
 
 	void (U_EXPORT2 *uInit)(UErrorCode* status);
+#ifdef WIN_NT
 	void (U_EXPORT2 *uSetDataDirectory)(const char* directory);
+#endif
 };
 }
 
@@ -238,7 +240,9 @@ private:
 		catch (const status_exception&)
 		{ }
 
+#ifdef WIN_NT
 		getEntryPoint("u_setDataDirectory", module, uSetDataDirectory);
+#endif
 		getEntryPoint("ucnv_open", module, ucnv_open);
 		getEntryPoint("ucnv_close", module, ucnv_close);
 		getEntryPoint("ucnv_fromUChars", module, ucnv_fromUChars);
@@ -1021,7 +1025,9 @@ UnicodeUtil::ICU* UnicodeUtil::loadICU(const string& icuVersion, const string& c
 
 		try
 		{
+#ifdef WIN_NT
 			icu->getEntryPoint("u_setDataDirectory", icu->ucModule, icu->uSetDataDirectory);
+#endif
 			icu->getEntryPoint("u_versionToString", icu->ucModule, icu->uVersionToString);
 			icu->getEntryPoint("uloc_countAvailable", icu->ucModule, icu->ulocCountAvailable);
 			icu->getEntryPoint("uloc_getAvailable", icu->ucModule, icu->ulocGetAvailable);
