@@ -133,7 +133,10 @@ ifeq ($(TOMBUILD_FLG),Y)
 	ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)/libtommath.dylib.0
 	ln -sf $(TOMMATH_SO) $(LIB)/
 	ln -sf $(TOMMATH_SO) $(LIB)/libtommath.dylib
-	ls -l $(LIB)
+	echo 111
+	ls -l $(TOMMATH)/.libs/
+	echo 222
+	ls -l $(LIB)/
 endif
 
 ifeq ($(STD_EDITLINE),false)
