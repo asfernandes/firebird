@@ -58,10 +58,12 @@ namespace {
 const char* const inTemplate = "icuin%s.dll";
 const char* const ucTemplate = "icuuc%s.dll";
 #elif defined(DARWIN)
-const char* const inTemplate = "/Library/Frameworks/Firebird.framework/Versions/A/Libraries/libicui18n.dylib";
-const char* const ucTemplate = "/Library/Frameworks/Firebird.framework/versions/A/Libraries/libicuuc.dylib";
+//const char* const inTemplate = "/Library/Frameworks/Firebird.framework/Versions/A/Libraries/libicui18n.dylib";
+//const char* const ucTemplate = "/Library/Frameworks/Firebird.framework/versions/A/Libraries/libicuuc.dylib";
 //const char* const inTemplate = "libicui18n.dylib";
 //const char* const ucTemplate = "libicuuc.dylib";
+const char* const inTemplate = "libicui18n.%s.dylib";
+const char* const ucTemplate = "libicuuc.%s.dylib";
 #elif defined(HPUX)
 const char* const inTemplate = "libicui18n.sl.%s";
 const char* const ucTemplate = "libicuuc.sl.%s";
