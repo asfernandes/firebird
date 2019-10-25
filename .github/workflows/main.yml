@@ -71,7 +71,7 @@ jobs:
         cd extern/icu-macos
         #wget http://download.icu-project.org/files/icu4c/54.1/icu4c-54_1-src.tgz
         #tar xzvf icu4c-54_1-src.tgz
-        wget http://download.icu-project.org/files/icu4c/59.2/icu4c-59_2-src.tgz
+        wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
         tar xzvf icu4c-59_2-src.tgz
         cd icu/source
         CONFIG_CPPFLAGS="-DUPLUG_TRACE=1" UCONFIG_CPPFLAGS="-DUPLUG_TRACE=1" ./runConfigureICU MacOSX --enable-debug
