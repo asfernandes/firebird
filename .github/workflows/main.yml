@@ -72,7 +72,7 @@ jobs:
         wget http://download.icu-project.org/files/icu4c/54.1/icu4c-54_1-src.tgz
         tar xzvf icu4c-54_1-src.tgz
         cd icu/source
-        UPLUG_TRACE=1 ./runConfigureICU MacOSX
+        CONFIG_CPPFLAGS="-DUPLUG_TRACE=1" UCONFIG_CPPFLAGS="-DUPLUG_TRACE=1" ./runConfigureICU MacOSX --enable-debug
         make -j4
         sudo make install
         symbols /usr/local/lib/libicuuc.dylib
