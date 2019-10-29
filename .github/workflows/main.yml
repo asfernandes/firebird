@@ -30,7 +30,7 @@ jobs:
       if: matrix.os == 'ubuntu-16.04'
       run: |
         CC=clang CXX=clang++ ./autogen.sh --enable-binreloc --with-builtin-tomcrypt --prefix=/opt/firebird
-        make -j4
+        make
         make dist
         tar xzvf gen/Firebird-[0-9]*.tar.gz
         (cd Firebird-[0-9]*; sudo ./install.sh -silent)
