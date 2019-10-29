@@ -11,7 +11,7 @@ jobs:
         #os: [ubuntu-16.04, windows-2016]
         #os: [windows-2016, macOS-latest]
         #os: [macOS-latest]
-        os: [windows-2016]
+        os: [ubuntu-16.04]
 
     steps:
     - uses: actions/checkout@v1
