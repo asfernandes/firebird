@@ -25,13 +25,10 @@ install:
       sudo apt-get update
       sudo apt-get install -y libtommath0 libtommath-dev libtomcrypt0 libtomcrypt-dev
     fi
-    if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-      brew update
-      brew install make libtool autoconf libtommath libtool
-    fi
-  # sudo python -m pip install Mako fdb
-  # svn co http://svn.code.sf.net/p/firebird/code/qa/fbtest/trunk/ fbtest
-  # svn co http://svn.code.sf.net/p/firebird/code/qa/fbt-repository/trunk/ fbtest/fbt
+    #if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+    #  brew update
+    #  brew install make libtool autoconf libtommath libtool
+    #fi
 
 script:
   - |
@@ -46,37 +43,15 @@ script:
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
-      brew list icu4c
-      brew link icu4c --force
-      brew list libtommath
-      icu-config --cppflags --prefix
-      export CFLAGS=-I/usr/local/Cellar/icu4c/include
-      export LDFLAGS=-L/usr/local/Cellar/icu4c/lib
-      ls /usr/local/opt/icu4c/lib
-      ls /usr/local/Cellar/icu4c/59.1_1
-      export DYLD_LIBRARY_PATH=/usr/local/Cellar/icu4c/59.1_1:$DYLD_LIBRARY_PATH
-      echo $DYLD_LIBRARY_PATH
-      DYLD_FALLBACK_LIBRARY_PATH=/usr/local/Cellar/icu4c/59.1_1
-      export DYLD_FALLBACK_LIBRARY_PATH
-      export CXXFLAGS="-stdlib=libc++ -Wno-c++11-narrowing -msse4"
-      export CXX=clang++
-      export CC=clang
-      echo objdump
-      objdump -T /usr/local/Cellar/icu4c/59.1_1/libicui18n.59.dylib
-      alias libtoolize=glibtoolize
-      git clone https://github.com/libtom/libtomcrypt.git
-      cd libtomcrypt
-      git checkout tags/v1.18.0
-      make
-      make install
-      cd ..
-      ./autogen.sh --disable-raw-devices
-      make
+      mkdir extern/icu-macos
+      cd extern/icu-macos
+      wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
+      tar xzvf icu4c-59_2-src.tgz
+      cd icu/source
+      ./runConfigureICU MacOSX --enable-debug
+      sudo make install
+      export CPPFLAGS="-stdlib=libc++"
+      export CXX="g++ -stdlib=libc++"
+      ./autogen.sh --with-builtin-tommath
+      make -j4
     fi
-
-  # sg firebird -c "/opt/firebird/bin/gsec -user sysdba -add sysdba -pw masterkey"
-  # ./travis.sh dummy_output &
-  # ./travis.sh skip_tests
-  # sleep 3
-  # cd fbtest/fbt
-  # sg firebird -c "python ../fbtest.py -d `pwd`/tmp -b /opt/firebird/bin -v -x -k ../../skip.txt"
