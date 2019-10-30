@@ -52,7 +52,7 @@ script:
       export CFLAGS=-I/usr/local/Cellar/icu4c/include
       export LDFLAGS=-L/usr/local/Cellar/icu4c/lib
       ls /usr/local/opt/icu4c/lib
-	  ls /usr/local/Cellar/icu4c/59.1_1
+      ls /usr/local/Cellar/icu4c/59.1_1
       export DYLD_LIBRARY_PATH=/usr/local/Cellar/icu4c/59.1_1:$DYLD_LIBRARY_PATH
       echo $DYLD_LIBRARY_PATH
       DYLD_FALLBACK_LIBRARY_PATH=/usr/local/Cellar/icu4c/59.1_1
@@ -60,8 +60,8 @@ script:
       export CXXFLAGS="-stdlib=libc++ -Wno-c++11-narrowing -msse4"
       export CXX=clang++
       export CC=clang
-	  echo objdump
-	  objdump -T /usr/local/Cellar/icu4c/59.1_1/libicui18n.59.dylib
+      echo objdump
+      objdump -T /usr/local/Cellar/icu4c/59.1_1/libicui18n.59.dylib
       alias libtoolize=glibtoolize
       git clone https://github.com/libtom/libtomcrypt.git
       cd libtomcrypt
