@@ -132,7 +132,7 @@ ifeq ($(TOMBUILD_FLG),Y)
 	#ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)
 	ln -sf $(TOMMATH)/.libs/libtommath.0.dylib $(LIB)/
 	ln -sf $(TOMMATH_SO) $(LIB)/
-	install_name_tool -id "$(LIB)/libtommath.0.dylib" $(TOMMATH)/.libs/libtommath.0.dylib
+	#install_name_tool -id "$(LIB)/libtommath.0.dylib" $(TOMMATH)/.libs/libtommath.0.dylib
 endif
 
 ifeq ($(STD_EDITLINE),false)
