@@ -97,7 +97,8 @@ jobs:
         #export DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:$DYLD_FALLBACK_LIBRARY_PATH
         ./autogen.sh --with-builtin-tommath
         make -j4
-        #make dist
+        (cd gen; make -B -f make.platform.postfix)
+        (cd gen; make -B -f Makefile.install)
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
