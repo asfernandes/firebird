@@ -97,8 +97,7 @@ jobs:
         #export DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:$DYLD_FALLBACK_LIBRARY_PATH
         ./autogen.sh --with-builtin-tommath
         make -j4
-        find .
-        make dist
+        #make dist
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
@@ -120,6 +119,13 @@ jobs:
       with:
         name: firebird.tar.gz
         path: gen/Firebird-[0-9]*.tar.gz
+
+    - name: Upload (MacOS)
+      if: matrix.os == 'macOS-latest'
+      uses: actions/upload-artifact@master
+      with:
+        name: firebird.tar.gz
+        path: gen/Release/firebird
 
     - name: Upload (Windows)
       if: matrix.os == 'windows-2016'
