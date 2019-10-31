@@ -1,9 +1,9 @@
 matrix:
   include:
   - os: osx
-    osx_image: xcode9.2
+    osx_image: xcode9.2    # macOS 10.12 Sierra
   - os: osx
-    osx_image: xcode11.2
+    osx_image: xcode11.2   # macOS 10.14 Mojave
   #- os: linux
 
 language: cpp
@@ -34,12 +34,13 @@ script:
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
       mkdir extern/icu-macos
-      cd extern/icu-macos
+      pushd extern/icu-macos
       wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
       tar xzvf icu4c-59_2-src.tgz
       cd icu/source
       ./runConfigureICU MacOSX
       sudo make install
+      popd
       export CPPFLAGS="-stdlib=libc++"
       export CXX="g++ -stdlib=libc++"
       ./autogen.sh --with-builtin-tommath
