@@ -1,7 +1,8 @@
 matrix:
   include:
   - os: osx
-    #osx_image: xcode9.2
+    osx_image: xcode9.2
+  - os: osx
     osx_image: xcode11.2
   #- os: linux
 
@@ -13,23 +14,12 @@ notifications:
 sudo: required
 dist: trusty
 
-branches:
-  only:
-    - work/github-actions-v3
-    #- master
-    #- B3_0_Release
 install:
-  # wget --no-check-certificate https://www.cmake.org/files/v3.2/cmake-3.2.3-Linux-x86_64.sh
-  # sudo sh cmake-3.2.3-Linux-x86_64.sh --skip-license --prefix=/usr
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
       sudo apt-get update
-      sudo apt-get install -y libtommath0 libtommath-dev libtomcrypt0 libtomcrypt-dev
+      sudo apt-get install -y libtommath0 libtommath-dev
     fi
-    #if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-    #  brew update
-    #  brew install make libtool autoconf libtommath libtool
-    #fi
 
 script:
   - |
@@ -39,7 +29,6 @@ script:
       make dist
       tar xzvf gen/Firebird-[0-9]*.tar.gz
       (cd Firebird-[0-9]*; sudo ./install.sh -silent)
-      sudo usermod -a -G firebird travis
     fi
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
       export LIBTOOLIZE=glibtoolize
@@ -49,7 +38,7 @@ script:
       wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
       tar xzvf icu4c-59_2-src.tgz
       cd icu/source
-      ./runConfigureICU MacOSX --enable-debug
+      ./runConfigureICU MacOSX
       sudo make install
       export CPPFLAGS="-stdlib=libc++"
       export CXX="g++ -stdlib=libc++"
