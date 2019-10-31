@@ -211,7 +211,7 @@ vpath %.dll $(LIB)
 # From jrd
 
 
-# The firebird shared library name 
+# The firebird shared library name
 # SD: This name is also hard-coded in builds/install/.../linux/classic scripts.
 #     Scold me, but I don't want library names to be in configure.in
 #
@@ -253,8 +253,12 @@ LIBIBUTIL_SO = $(LIB)/$(IbUtilLibraryName)
 # Own tommath support
 TOMMATH=$(ROOT)/extern/libtommath
 TOMMATH_INC=$(TOMMATH)
-TOMMATH_SO=$(TOMMATH)/.libs/libtommath.dylib
 TOMMATH_VER=0
+ifeq ($(PLATFORM),DARWIN)
+TOMMATH_SO=$(TOMMATH)/.libs/libtommath.dylib
+else
+TOMMATH_SO=$(TOMMATH)/.libs/libtommath.so
+endif
 
 # LINKER OPTIONS
 #

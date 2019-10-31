@@ -129,10 +129,13 @@ extern:
 ifeq ($(TOMBUILD_FLG),Y)
 	echo $(LIBTOOL)
 	$(MAKE) -C $(ROOT)/extern/libtommath -f makefile.shared LIBTOOL=$(LIBTOOL)
-	#ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)
+ifeq ($(PLATFORM),DARWIN)
 	ln -sf $(TOMMATH)/.libs/libtommath.0.dylib $(LIB)/
-	ln -sf $(TOMMATH_SO) $(LIB)/
 	install_name_tool -id "$(LIB)/libtommath.0.dylib" $(TOMMATH)/.libs/libtommath.0.dylib
+else
+	ln -sf $(TOMMATH_SO).$(TOMMATH_VER) $(LIB)
+endif
+	ln -sf $(TOMMATH_SO) $(LIB)
 endif
 
 ifeq ($(STD_EDITLINE),false)
