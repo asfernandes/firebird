@@ -57,7 +57,6 @@ jobs:
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        env
         #export PATH="/usr/local/opt/icu4c/bin:$PATH"
         #export PATH="/usr/local/opt/icu4c/sbin:$PATH"
         #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
@@ -70,6 +69,9 @@ jobs:
         export DYLD_LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$DYLD_LIBRARY_PATH"
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
+        env
+        find . -name ucnv.h
+        find . -name 'libicuuc*'
         ./autogen.sh --with-builtin-tommath
         make -j4
         (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
