@@ -63,6 +63,8 @@ jobs:
         #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
         #export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
+        export LIBTOOLIZE=glibtoolize
+        export LIBTOOL=glibtool
         export CPLUS_INCLUDE_PATH="`pwd`/extern/icu-macos/icu/source/common:$CPLUS_INCLUDE_PATH"
         export LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$LIBRARY_PATH"
         export DYLD_LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$DYLD_LIBRARY_PATH"
