@@ -97,8 +97,9 @@ jobs:
         #export DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:$DYLD_FALLBACK_LIBRARY_PATH
         ./autogen.sh --with-builtin-tommath
         make -j4
-        (cd gen; make -B -f make.platform.postfix)
+        (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
         (cd gen; make -B -f Makefile.install)
+        find . -name '*.pkg'
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
@@ -125,8 +126,8 @@ jobs:
       if: matrix.os == 'macOS-latest'
       uses: actions/upload-artifact@master
       with:
-        name: firebird.tar.gz
-        path: gen/Release/firebird
+        name: packages
+        path: gen/Release/packages
 
     - name: Upload (Windows)
       if: matrix.os == 'windows-2016'

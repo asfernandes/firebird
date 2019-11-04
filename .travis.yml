@@ -47,7 +47,7 @@ script:
       export CXX="g++ -stdlib=libc++"
       ./autogen.sh --with-builtin-tommath
       make -j4
-      make --version
       (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
       (cd gen; make -B -f Makefile.install)
+      find . -name '*.pkg'
     fi
