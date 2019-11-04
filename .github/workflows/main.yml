@@ -38,40 +38,13 @@ jobs:
     - name: Prepare (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        #curl https://ipinfo.io/ip
-        #echo x0
-        #brew install tmux tmate reattach-to-user-namespace
-        #echo x0
-        #echo "set-option -g default-command \"which reattach-to-user-namespace > /dev/null && reattach-to-user-namespace -l \$SHELL || \$SHELL\"" >> ~/.tmux.conf
-        #echo x1
-        #tmate -S /tmp/tmate.sock new-session -d
-        #sleep 5
-        #echo x2
-        #tmate -S /tmp/tmate.sock wait tmate-ready
-        #sleep 10
-        #echo x3
-        #sleep 10
-        ##tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
-        #echo x4
-        #tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
-        #sleep 10
-        #echo x5
-        #tmate -S /tmp/tmate.sock show-messages
-        #echo x6
-        #sleep 121
-        #echo x7
         brew install automake libtool
-        ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
-        ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
-        #brew install icu4c
-        #brew link icu4c --force
-        #brew info icu4c
-        #brew install libtommath
-        #brew install libtomcrypt
+        #ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
+        #ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
+        export LIBTOOLIZE=glibtoolize
+        export LIBTOOL=glibtool
         mkdir extern/icu-macos
         cd extern/icu-macos
-        #wget http://download.icu-project.org/files/icu4c/54.1/icu4c-54_1-src.tgz
-        #tar xzvf icu4c-54_1-src.tgz
         wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
         wget https://github.com/unicode-org/icu/commit/24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
         tar xzvf icu4c-59_2-src.tgz
@@ -79,7 +52,7 @@ jobs:
         patch -p3 < ../../24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
         ./runConfigureICU MacOSX
         make -j4
-        sudo make install
+        #sudo make install
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
@@ -90,10 +63,11 @@ jobs:
         #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
         #export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
+        export CPLUS_INCLUDE_PATH="`pwd`/extern/icu-macos/icu/source/common:$CPLUS_INCLUDE_PATH"
+        export LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$LIBRARY_PATH"
+        export DYLD_LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$DYLD_LIBRARY_PATH"
         export CPPFLAGS="-stdlib=libc++"
         export CXX="g++ -stdlib=libc++"
-        #export DYLD_LIBRARY_PATH=/usr/local/lib:$DYLD_LIBRARY_PATH
-        #export DYLD_FALLBACK_LIBRARY_PATH=/usr/local/lib:$DYLD_FALLBACK_LIBRARY_PATH
         ./autogen.sh --with-builtin-tommath
         make -j4
         (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
