@@ -43,6 +43,7 @@ script:
       ./runConfigureICU MacOSX
       sudo make install
       popd
+      find /usr/local -name 'libicu*'
       export CPPFLAGS="-stdlib=libc++"
       export CXX="g++ -stdlib=libc++"
       ./autogen.sh --with-builtin-tommath

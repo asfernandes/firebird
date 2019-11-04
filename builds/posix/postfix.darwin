@@ -21,7 +21,8 @@
 
 FB_FW = ../gen/Release/Firebird.framework
 ICU_VERS = icu54
-ICU_LOC = $(HOME)/$(ICU_VERS)/icu/source/lib/
+#ICU_LOC = $(HOME)/$(ICU_VERS)/icu/source/lib/
+ICU_LOC = /usr/local/lib/
 
 all: otool framework
 
@@ -152,7 +153,7 @@ framework darwin_finish_framework:
 	cp -r ../gen/Release/firebird/examples $(FB_FW)/Resources
 	mkdir -p $(FB_FW)/Resources/bin
 	touch $(FB_FW)/Resources/SuperServer
-	chflags hidden $(FB_FW)/Resources/SuperServer 
+	chflags hidden $(FB_FW)/Resources/SuperServer
 	cp ../gen/Release/firebird/bin/gfix $(FB_FW)/Versions/A/Resources/bin
 	cp ../gen/Release/firebird/bin/gbak $(FB_FW)/Versions/A/Resources/bin
 	cp ../gen/Release/firebird/bin/isql $(FB_FW)/Versions/A/Resources/bin
