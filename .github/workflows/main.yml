@@ -64,6 +64,7 @@ jobs:
         #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
         export LIBTOOLIZE=glibtoolize
         export LIBTOOL=glibtool
+        export C_INCLUDE_PATH="`pwd`/extern/icu-macos/icu/source/common:$C_INCLUDE_PATH"
         export CPLUS_INCLUDE_PATH="`pwd`/extern/icu-macos/icu/source/common:$CPLUS_INCLUDE_PATH"
         export LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$LIBRARY_PATH"
         export DYLD_LIBRARY_PATH="`pwd`/extern/icu-macos/icu/source/lib:$DYLD_LIBRARY_PATH"
