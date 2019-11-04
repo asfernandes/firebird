@@ -21,8 +21,7 @@
 
 FB_FW = ../gen/Release/Firebird.framework
 ICU_VERS = icu54
-#ICU_LOC = $(HOME)/$(ICU_VERS)/icu/source/lib/
-ICU_LOC = /usr/local/lib/
+ICU_LOC = $(HOME)/$(ICU_VERS)/icu/source/lib/
 
 all: otool framework
 
