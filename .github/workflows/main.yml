@@ -99,7 +99,6 @@ jobs:
         make -j4
         (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
         (cd gen; make -B -f Makefile.install)
-        find . -name '*.pkg'
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
@@ -119,19 +118,19 @@ jobs:
       if: matrix.os == 'ubuntu-16.04'
       uses: actions/upload-artifact@master
       with:
-        name: firebird.tar.gz
+        name: firebird-linux
         path: gen/Firebird-[0-9]*.tar.gz
 
     - name: Upload (MacOS)
       if: matrix.os == 'macOS-latest'
       uses: actions/upload-artifact@master
       with:
-        name: packages
-        path: gen/Release/packages
+        name: firebird-macos
+        path: gen/Release/*.pkg
 
     - name: Upload (Windows)
       if: matrix.os == 'windows-2016'
       uses: actions/upload-artifact@master
       with:
-        name: firebird.zip
+        name: firebird-windows
         path: output_x64
