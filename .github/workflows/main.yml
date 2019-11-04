@@ -77,10 +77,9 @@ jobs:
         tar xzvf icu4c-59_2-src.tgz
         cd icu/source
         patch -p3 < ../../24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
-        CONFIG_CPPFLAGS="-DUPLUG_TRACE=1" UCONFIG_CPPFLAGS="-DUPLUG_TRACE=1" ./runConfigureICU MacOSX --enable-debug
+        ./runConfigureICU MacOSX
         make -j4
         sudo make install
-        symbols /usr/local/lib/libicuuc.dylib
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
