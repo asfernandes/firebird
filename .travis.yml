@@ -43,11 +43,10 @@ script:
       ./runConfigureICU MacOSX
       sudo make install
       popd
-      find . -name 'libicu*'
       export CPPFLAGS="-stdlib=libc++"
       export CXX="g++ -stdlib=libc++"
       ./autogen.sh --with-builtin-tommath
       make -j4
-      (cd gen; make -B -f make.platform.postfix ICU_LOC='/usr/local/lib/')
+      (cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/extern/icu-macos/icu/source/lib/")
       (cd gen; make -B -f Makefile.install)
     fi
