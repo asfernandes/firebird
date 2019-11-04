@@ -125,7 +125,7 @@ jobs:
       uses: actions/upload-artifact@master
       with:
         name: firebird-macos
-        path: gen/Release/*.pkg
+        path: gen/Release/packages
 
     - name: Upload (Windows)
       if: matrix.os == 'windows-2016'
