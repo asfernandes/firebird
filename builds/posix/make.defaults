@@ -286,8 +286,10 @@ LINK_EMPTY_SYMBOLS = $(call LIB_LINK_MAPFILE,$(EMPTY_VERS))
 LINK_PLUGIN_SYMBOLS = $(call LIB_LINK_MAPFILE,$(PLUGIN_VERS))
 LINK_EXEC_EXPORT=-rdynamic
 
+ifeq ($(PLATFORM),DARWIN)
+    LIB_LINK_RPATH = -Wl,-rpath,@executable_path/../$(1)
+else
 LIB_PLATFORM_RPATH = -Wl,-rpath,$(1)
-
 ifeq (@USE_RPATH@,1)
     ifeq ($(strip @BINRELOC_CFLAGS@),)
         LIB_LINK_RPATH = $(call LIB_PLATFORM_RPATH,$(if $(subst intl,,$(1)),@FB_LIBDIR@,@FB_INTLDIR@))
@@ -297,6 +299,8 @@ ifeq (@USE_RPATH@,1)
 else
     LIB_LINK_RPATH =
 endif
+endif
+
 LIB_PATH_OPTS = $(call LIB_LINK_RPATH,lib) $(call LIB_LINK_RPATH,intl)
 LIB_LINK_SONAME= -Wl,-soname,$(1)
 LIB_LINK_MAPFILE= -Wl,--version-script,$(1)
