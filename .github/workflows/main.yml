@@ -56,7 +56,6 @@ jobs:
         #sudo make install
         make install
 
-
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
