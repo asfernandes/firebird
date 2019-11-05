@@ -55,7 +55,9 @@ jobs:
         make -j4
         #sudo make install
         make install
-
+        install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
+        install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
+        install_name_tool -id @rpath/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'

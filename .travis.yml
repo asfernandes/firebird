@@ -44,6 +44,9 @@ script:
       ./runConfigureICU MacOSX --prefix=$ICU_INSTALL_PATH
       #sudo make install
       make install
+      install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
+      install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
+      install_name_tool -id @rpath/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
       popd
       export C_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$C_INCLUDE_PATH"
       export CPLUS_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$CPLUS_INCLUDE_PATH"
