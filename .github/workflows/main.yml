@@ -55,10 +55,12 @@ jobs:
         make -j4
         #sudo make install
         make install
-        install_name_tool -id @loader_path/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
-        install_name_tool -id @loader_path/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
-        install_name_tool -id @loader_path/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
-        install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
+        install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
+        install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
+        install_name_tool -id @rpath/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
+        install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
+        install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+        install_name_tool -change libicuuc.59.dylib @rpath/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
