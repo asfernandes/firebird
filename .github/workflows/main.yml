@@ -82,7 +82,8 @@ jobs:
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 
-        sudo installer -pkg gen/Release/*.pkg
+        sudo installer -pkg gen/Release/*.pkg -verbose -target /
+        find /Library/Frameworks/Firebird.framework
 
         mkdir gen/artifacts
         mv gen/Release/*.pkg gen/artifacts
