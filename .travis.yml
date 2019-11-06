@@ -68,4 +68,6 @@ script:
       (cd gen; make -B -f Makefile.install)
 
       find . -name '*.pkg'
+      ls -l gen/Release/*.pkg
+      ls -l gen/Release/packages/
     fi

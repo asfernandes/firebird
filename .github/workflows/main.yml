@@ -82,6 +82,12 @@ jobs:
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 
+        ls -l gen/Release/*.pkg
+        ls -l gen/Release/packages/
+
+        mkdir gen/artifacts
+        mv gen/Release/*.pkg gen/artifacts
+
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
       shell: cmd
@@ -108,7 +114,7 @@ jobs:
       uses: actions/upload-artifact@master
       with:
         name: firebird-macos
-        path: gen/Release/packages
+        path: gen/artifacts
 
     - name: Upload (Windows)
       if: matrix.os == 'windows-2016'
