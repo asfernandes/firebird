@@ -39,12 +39,11 @@ jobs:
       if: matrix.os == 'macOS-latest'
       run: |
         brew install automake libtool
-        #ln -s /usr/local/bin/glibtoolize /usr/local/bin/libtoolize
-        #ln -s /usr/local/bin/glibtool /usr/local/bin/libtool
         export LIBTOOLIZE=glibtoolize
         export LIBTOOL=glibtool
+
         mkdir extern/icu-macos
-        cd extern/icu-macos
+        pushd extern/icu-macos
         wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
         wget https://github.com/unicode-org/icu/commit/24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
         tar xzvf icu4c-59_2-src.tgz
@@ -53,7 +52,6 @@ jobs:
         patch -p3 < ../../24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
         ./runConfigureICU MacOSX --prefix=$ICU_INSTALL_PATH
         make -j4
-        #sudo make install
         make install
         install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
         install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
@@ -61,31 +59,26 @@ jobs:
         install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
         install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
         install_name_tool -change libicuuc.59.dylib @rpath/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+        popd
+        mkdir -p gen/Release/firebird/lib
+        mkdir -p gen/Debug/firebird/lib
+        cp $ICU_INSTALL_PATH/lib/*.dylib gen/Release/firebird/lib/
+        cp $ICU_INSTALL_PATH/lib/*.dylib gen/Debug/firebird/lib/
 
     - name: Build (MacOS)
       if: matrix.os == 'macOS-latest'
       run: |
-        #export PATH="/usr/local/opt/icu4c/bin:$PATH"
-        #export PATH="/usr/local/opt/icu4c/sbin:$PATH"
-        #export LDFLAGS="-L/usr/local/opt/icu4c/lib"
-        #export CPPFLAGS="-I/usr/local/opt/icu4c/include -stdlib=libc++"
-        #export CXX="g++ -I/usr/local/opt/icu4c/include -stdlib=libc++"
-        ICU_INSTALL_PATH=`pwd`/extern/icu-macos/install
         export LIBTOOLIZE=glibtoolize
         export LIBTOOL=glibtool
+
+        ICU_INSTALL_PATH=`pwd`/extern/icu-macos/install
+
         export C_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$C_INCLUDE_PATH"
         export CPLUS_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$CPLUS_INCLUDE_PATH"
-        #export LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH"
-        #export DYLD_LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$DYLD_LIBRARY_PATH"
-        #export CPPFLAGS="-stdlib=libc++"
-        export CXX="g++ -stdlib=libc++"
-        env
-        mkdir -p gen/Release/firebird/lib
-        cp $ICU_INSTALL_PATH/lib/*.dylib gen/Release/firebird/lib/
-        find . -name utrans.h
-        find . -name 'libicuuc*'
+
         LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH" ./autogen.sh --with-builtin-tommath
         make -j4
+
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 

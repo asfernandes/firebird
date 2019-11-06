@@ -30,9 +30,11 @@ script:
       tar xzvf gen/Firebird-[0-9]*.tar.gz
       (cd Firebird-[0-9]*; sudo ./install.sh -silent)
     fi
+
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
+
       mkdir extern/icu-macos
       pushd extern/icu-macos
       wget https://github.com/unicode-org/icu/releases/download/release-59-2/icu4c-59_2-src.tgz
@@ -42,7 +44,7 @@ script:
       cd icu/source
       patch -p3 < ../../24aeb9a5a5874f4ce5db912e30670ac3ae236971.patch
       ./runConfigureICU MacOSX --prefix=$ICU_INSTALL_PATH
-      #sudo make install
+      make -j4
       make install
       install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
       install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
@@ -51,21 +53,19 @@ script:
       install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
       install_name_tool -change libicuuc.59.dylib @rpath/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
       popd
+      mkdir -p gen/Release/firebird/lib
+      mkdir -p gen/Debug/firebird/lib
+      cp $ICU_INSTALL_PATH/lib/*.dylib gen/Release/firebird/lib/
+      cp $ICU_INSTALL_PATH/lib/*.dylib gen/Debug/firebird/lib/
+
       export C_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$C_INCLUDE_PATH"
       export CPLUS_INCLUDE_PATH="$ICU_INSTALL_PATH/include:$CPLUS_INCLUDE_PATH"
-      #export LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH"
-      #export DYLD_LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$DYLD_LIBRARY_PATH"
-      #export CPPFLAGS="-stdlib=libc++"
-      export CXX="g++ -stdlib=libc++"
-      env
-      mkdir -p gen/Release/firebird/lib
-      cp $ICU_INSTALL_PATH/lib/*.dylib gen/Release/firebird/lib/
-      find . -name utrans.h
-      find . -name 'libicuuc*'
+
       LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH" ./autogen.sh --with-builtin-tommath
       make -j4
-      #(cd gen; make -B -f make.platform.postfix ICU_LOC="`pwd`/../extern/icu-macos/icu/source/lib/")
+
       (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
       (cd gen; make -B -f Makefile.install)
+
       find . -name '*.pkg'
     fi
