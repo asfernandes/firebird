@@ -82,8 +82,7 @@ jobs:
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 
-        ls -l gen/Release/*.pkg
-        ls -l gen/Release/packages/
+        sudo installer -pkg gen/Release/*.pkg
 
         mkdir gen/artifacts
         mv gen/Release/*.pkg gen/artifacts
