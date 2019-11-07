@@ -1,7 +1,7 @@
 matrix:
   include:
-  - os: osx
-    osx_image: xcode9.2    # macOS 10.12 Sierra
+  #- os: osx
+  #  osx_image: xcode9.2    # macOS 10.12 Sierra
   - os: osx
     osx_image: xcode11.2   # macOS 10.14 Mojave
   #- os: linux
@@ -50,6 +50,11 @@ script:
       otool -L out/lib1/lib1.dylib
       echo otool lib2
       otool -L out/lib2/lib2.dylib
+
+      gcc -dynamiclib lib1.cpp -install_name @rpath/lib1b.dylib -o out/lib1/lib1b.dylib
+      gcc -dynamiclib lib2.cpp -Wl,-rpath,@loader_path/../lib1 -install_name @rpath/lib2b.dylib -o out/lib2/lib2b.dylib -Lout/lib1 -l1b
+      gcc exe1.cpp -Wl,-rpath,@loader_path/lib2 -o out/exe/exe3.out -Lout/lib2 -l2b
+
       exit
 
       export LIBTOOLIZE=glibtoolize
