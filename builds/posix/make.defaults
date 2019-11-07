@@ -304,10 +304,6 @@ endif
 LIB_PATH_OPTS = $(call LIB_LINK_RPATH,lib) $(call LIB_LINK_RPATH,intl)
 
 LIB_LINK_SONAME= -Wl,-soname,$(1)
-ifeq ($(PLATFORM),DARWIN)
-    LIB_LINK_SONAME += -install_name @rpath/$(1)
-endif
-
 LIB_LINK_MAPFILE= -Wl,--version-script,$(1)
 FIREBIRD_LIBRARY_LINK= -L$(LIB) -lfbclient $(MATHLIB)
 
