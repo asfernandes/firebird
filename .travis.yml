@@ -55,6 +55,15 @@ script:
       gcc -dynamiclib lib2.cpp -Wl,-rpath,@loader_path/../lib1 -install_name @rpath/lib2b.dylib -o out/lib2/lib2b.dylib -Lout/lib1 -l1b
       gcc exe1.cpp -Wl,-rpath,@loader_path/lib2 -o out/exe/exe3.out -Lout/lib2 -l2b
 
+      echo echo exe3
+      ./out/exe/exe3.out
+      echo otool exe3
+      otool -L out/exe/exe3.out
+      echo otool lib1b
+      otool -L out/lib1/lib1b.dylib
+      echo otool lib2b
+      otool -L out/lib2/lib2b.dylib
+
       exit
 
       export LIBTOOLIZE=glibtoolize
