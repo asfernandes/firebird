@@ -42,6 +42,14 @@ script:
       ./out/exe/exe1.out
       echo echo exe2
       ./out/exe/exe2.out
+      echo otool exe1
+      otool -L out/exe/exe1.out
+      echo otool exe2
+      otool -L out/exe/exe2.out
+      echo otool lib1
+      otool -L out/lib1/lib1.dylib
+      echo otool lib2
+      otool -L out/lib2/lib2.dylib
       exit
 
       export LIBTOOLIZE=glibtoolize
