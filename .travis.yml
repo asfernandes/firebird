@@ -32,6 +32,17 @@ script:
     fi
 
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+      mkdir -p out/exe out/lib1 out/lib2
+      gcc -dynamiclib lib1.cpp -install_name @rpath/lib1/lib1.dylib -o out/lib1/lib1.dylib
+      gcc -dynamiclib lib2.cpp -install_name @rpath/lib2/lib2.dylib -o out/lib2/lib2.dylib -Lout/lib1 -l1
+      gcc exe1.cpp -Wl,-rpath,@executable_path/.. -o out/exe/exe1.out -Lout/lib2 -l2
+      gcc exe1.cpp -Wl,-rpath,@loader_path/.. -o out/exe/exe2.out -Lout/lib2 -l2
+      echo echo exe1
+      ./out/exe/exe1.out
+      echo echo exe2
+      ./out/exe/exe2.out
+      exit
+
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
 
