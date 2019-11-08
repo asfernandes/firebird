@@ -307,7 +307,7 @@ endif
 
 # remote redirector is statically linked in main FB library
 $(LIBFIREBIRD_FULLNAME):	$(YValve_Objects) $(Remote_Client_Objects) $(COMMON_LIB)
-	$(LINK_FIREBIRD) -o $@ $^ $(LINK_FIREBIRD_LIBS)
+	$(LINK_FIREBIRD) -o $@ $^ $(LINK_FIREBIRD_LIBS) $(call LIB_LINK_DARWIN_INSTALL_NAME,lib/libfbclient.$(SHRLIB_EXT))
 
 
 #___________________________________________________________________________
