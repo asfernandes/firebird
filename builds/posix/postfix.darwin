@@ -97,14 +97,12 @@ framework darwin_setup_framework:
 	ln -s A $(FB_FW)/Versions/Current
 	ln -s ../../../include $(FB_FW)/Versions/A/Headers
 	ln -s ../../../lib $(FB_FW)/Versions/A/Libraries
-	ln -s ../../../../../../firebird.msg \
-			$(FB_FW)/Resources/firebird.msg
+	ln -s ../../../../../../firebird.msg $(FB_FW)/Resources/firebird.msg
 	ln -s ../../../../../../bin $(FB_FW)/Resources/bin
 	ln -s ../../../../../../UDF $(FB_FW)/Resources/UDF
 	ln -s ../../../../../../intl $(FB_FW)/Resources/intl
 	ln -s ../../../../../../plugins $(FB_FW)/Resources/plugins
-	ln -s ../../../../../../security3.fdb \
-				$(FB_FW)/Resources/security3.fdb
+	ln -s ../../../../../../security3.fdb $(FB_FW)/Resources/security3.fdb
 	ln -s ../../../../../../help $(FB_FW)/Resources/help
 
 framework darwin_finish_framework: FB_FW = ../gen/$(TARGET)/frameworks/Firebird3.framework
@@ -118,12 +116,21 @@ framework darwin_finish_framework:
 	ln -s A $(FB_FW)/Versions/Current
 	cp -r ../gen/$(TARGET)/firebird/include $(FB_FW)/Versions/A/Headers
 	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Firebird
-	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
+	#cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
 	cp $(ICU_LOC)*.dylib ../gen/$(TARGET)/firebird/lib/
-	cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Libraries/libicudata.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Libraries/libicui18n.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Libraries/libicuuc.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
+	#cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Libraries/libicudata.dylib
+	#cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Libraries/libicui18n.dylib
+	#cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Libraries/libicuuc.dylib
+	#cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
+
+	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Resources/lib/libfbclient.dylib
+	cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Resources/lib/libicudata.dylib
+	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Resources/lib/libicui18n.dylib
+	cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Resources/lib/libicuuc.dylib
+	cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Resources/lib/libib_util.dylib
+	ln -s $(FB_FW)/Versions/A/Libraries/libfbclient.dylib ../Resources/lib/libfbclient.dylib
+	ln -s $(FB_FW)/Versions/A/Libraries/libib_util.dylib ../Resources/lib/libib_util.dylib
+
 	mkdir -p $(FB_FW)/Versions/A/Resources/English.lproj
 	mkdir -p $(FB_FW)/Versions/A/Resources/UDF
 	cp  ../gen/$(TARGET)/firebird/UDF/fbudf.dylib $(FB_FW)/Versions/A/Resources/UDF/fbudf.dylib
@@ -132,17 +139,12 @@ framework darwin_finish_framework:
 	cp  ../gen/$(TARGET)/firebird/UDF/ib_udf.sql $(FB_FW)/Versions/A/Resources/UDF/ib_udf.sql
 	cp  ../gen/$(TARGET)/firebird/UDF/ib_udf2.sql $(FB_FW)/Versions/A/Resources/UDF/ib_udf2.sql
 	mkdir -p $(FB_FW)/Versions/A/Resources/intl
-	cp -r ../gen/$(TARGET)/firebird/intl/libfbintl.dylib \
-		$(FB_FW)/Versions/A/Resources/intl/fbintl
-	cp ../gen/$(TARGET)/firebird/intl/fbintl.conf \
-		$(FB_FW)/Versions/A/Resources/intl/fbintl.conf
+	cp -r ../gen/$(TARGET)/firebird/intl/libfbintl.dylib $(FB_FW)/Versions/A/Resources/intl/libfbintl.dylib
+	cp ../gen/$(TARGET)/firebird/intl/fbintl.conf $(FB_FW)/Versions/A/Resources/intl/fbintl.conf
 	chmod a+rx $(FB_FW)/Versions/A/Resources/intl/fbintl
-	cp -r ../gen/$(TARGET)/firebird/plugins \
-		$(FB_FW)/Versions/A/Resources/plugins
-	cp ../gen/$(TARGET)/firebird/security3.fdb \
-                        $(FB_FW)/Versions/A/Resources/security3.fdb
-	cp ../gen/$(TARGET)/firebird/firebird.msg \
-                        $(FB_FW)/Versions/A/Resources/firebird.msg
+	cp -r ../gen/$(TARGET)/firebird/plugins $(FB_FW)/Versions/A/Resources/plugins
+	cp ../gen/$(TARGET)/firebird/security3.fdb $(FB_FW)/Versions/A/Resources/security3.fdb
+	cp ../gen/$(TARGET)/firebird/firebird.msg $(FB_FW)/Versions/A/Resources/firebird.msg
 	cp -r ../gen/$(TARGET)/firebird/help $(FB_FW)/Versions/A/Resources/help
 	mkdir -p $(FB_FW)/Resources/doc
 	cp -r ../doc $(FB_FW)/Resources
@@ -164,29 +166,18 @@ framework darwin_finish_framework:
 	cp ../gen/$(TARGET)/firebird/bin/fbtracemgr $(FB_FW)/Versions/A/Resources/bin
 	cp ../gen/$(TARGET)/firebird/bin/firebird $(FB_FW)/Versions/A/Resources/bin
 	chmod +x ../builds/install/arch-specific/darwin/changeServerMode
-	cp ../builds/install/arch-specific/darwin/changeServerMode \
-			$(FB_FW)/Versions/A/Resources/bin/changeServerMode.sh
+	cp ../builds/install/arch-specific/darwin/changeServerMode $(FB_FW)/Versions/A/Resources/bin/changeServerMode.sh
 	cp ../src/extlib/ib_udf.sql $(FB_FW)/Versions/A/Resources/UDF
 	cp ../src/extlib/fbudf/fbudf.sql $(FB_FW)/Versions/A/Resources/UDF
-	cp ../builds/install/arch-specific/darwin/FrameworkInfo.plist \
-			$(FB_FW)/Versions/A/Resources/Info.plist
-	cp ../builds/install/arch-specific/darwin/launchd.org.firebird.gds.plist \
-			$(FB_FW)/Versions/A/Resources/org.firebird.gds.plist
-	cp ../builds/install/arch-specific/darwin/launchdcs.org.firebird.gds.plist \
-			$(FB_FW)/Versions/A/Resources/cs.org.firebird.gds.plist
-	cp ../builds/install/arch-specific/darwin/Readme.txt \
-			$(FB_FW)/Versions/A/Resources/Readme.txt
-	cp ../builds/install/arch-specific/darwin/License.txt \
-			$(FB_FW)/Versions/A/Resources/License.txt
-	cp ../gen/$(TARGET)/firebird/firebird.conf \
-                        $(FB_FW)/Versions/A/Resources//firebird.conf
-	cp ../gen/$(TARGET)/firebird/databases.conf \
-		$(FB_FW)/Versions/A/Resources/databases.conf
-	cp ../gen/$(TARGET)/firebird/fbtrace.conf \
-			$(FB_FW)/Versions/A/Resources/fbtrace.conf
-	cp ../gen/$(TARGET)/firebird/plugins.conf \
-			$(FB_FW)/Versions/A/Resources/plugins.conf
+	cp ../builds/install/arch-specific/darwin/FrameworkInfo.plist $(FB_FW)/Versions/A/Resources/Info.plist
+	cp ../builds/install/arch-specific/darwin/launchd.org.firebird.gds.plist $(FB_FW)/Versions/A/Resources/org.firebird.gds.plist
+	cp ../builds/install/arch-specific/darwin/launchdcs.org.firebird.gds.plist $(FB_FW)/Versions/A/Resources/cs.org.firebird.gds.plist
+	cp ../builds/install/arch-specific/darwin/Readme.txt $(FB_FW)/Versions/A/Resources/Readme.txt
+	cp ../builds/install/arch-specific/darwin/License.txt $(FB_FW)/Versions/A/Resources/License.txt
+	cp ../gen/$(TARGET)/firebird/firebird.conf $(FB_FW)/Versions/A/Resources//firebird.conf
+	cp ../gen/$(TARGET)/firebird/databases.conf $(FB_FW)/Versions/A/Resources/databases.conf
+	cp ../gen/$(TARGET)/firebird/fbtrace.conf $(FB_FW)/Versions/A/Resources/fbtrace.conf
+	cp ../gen/$(TARGET)/firebird/plugins.conf $(FB_FW)/Versions/A/Resources/plugins.conf
 	mkdir $(FB_FW)/Versions/A/Resources/misc
 	mkdir $(FB_FW)/Versions/A/Resources/misc/upgrade
-	cp -r ../src/misc/upgrade/v3.0 \
-		$(FB_FW)/Versions/A/Resources/misc/upgrade
+	cp -r ../src/misc/upgrade/v3.0 $(FB_FW)/Versions/A/Resources/misc/upgrade
