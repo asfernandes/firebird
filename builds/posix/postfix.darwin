@@ -110,20 +110,23 @@ framework darwin_finish_framework: FB_FW = ../gen/$(TARGET)/frameworks/Firebird3
 framework darwin_finish_framework:
 	-$(RM) -rf $(FB_FW)
 	mkdir -p $(FB_FW)/Versions/A/Libraries
+
+	cp $(ICU_LOC)*.dylib ../gen/$(TARGET)/firebird/lib/
+
 	ln -s Versions/Current/Firebird $(FB_FW)/Firebird
 	ln -s Versions/Current/Headers $(FB_FW)/Headers
 	ln -s Versions/Current/Resources $(FB_FW)/Resources
 	ln -s Versions/Current/Libraries $(FB_FW)/Libraries
 	ln -s A $(FB_FW)/Versions/Current
 	cp -r ../gen/$(TARGET)/firebird/include $(FB_FW)/Versions/A/Headers
-	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Firebird
+	#cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Firebird
 	#cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
-	cp $(ICU_LOC)*.dylib ../gen/$(TARGET)/firebird/lib/
 	#cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Libraries/libicudata.dylib
 	#cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Libraries/libicui18n.dylib
 	#cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Libraries/libicuuc.dylib
 	#cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
 
+	mkdir $(FB_FW)/Versions/A/Resources/lib
 	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Resources/lib/libfbclient.dylib
 	cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Resources/lib/libicudata.dylib
 	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Resources/lib/libicui18n.dylib
