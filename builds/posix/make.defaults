@@ -288,7 +288,7 @@ LINK_EXEC_EXPORT=-rdynamic
 
 ifeq ($(PLATFORM),DARWIN)
     #LIB_LINK_RPATH = -Wl,-rpath,@executable_path/../$(1)
-	LIB_LINK_RPATH =
+    LIB_LINK_RPATH =
 else
 LIB_PLATFORM_RPATH = -Wl,-rpath,$(1)
 ifeq (@USE_RPATH@,1)
@@ -307,7 +307,7 @@ ifeq ($(PLATFORM),DARWIN)
     LIB_LINK_DARWIN_INSTALL_NAME = - install_name @rpath/$(1)
 else
     LINK_DARWIN_RPATH =
-	LIB_LINK_DARWIN_INSTALL_NAME =
+    LIB_LINK_DARWIN_INSTALL_NAME =
 endif
 
 LIB_PATH_OPTS = $(call LIB_LINK_RPATH,lib) $(call LIB_LINK_RPATH,intl)
