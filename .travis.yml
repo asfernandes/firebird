@@ -32,7 +32,7 @@ script:
     fi
 
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-      cd tests
+      pushd tests
       mkdir -p out/exe out/lib1 out/lib2
       gcc -dynamiclib lib1.cpp -install_name @rpath/lib1/lib1.dylib -o out/lib1/lib1.dylib
       gcc -dynamiclib lib2.cpp -install_name @rpath/lib2/lib2.dylib -o out/lib2/lib2.dylib -Lout/lib1 -l1
@@ -64,6 +64,7 @@ script:
       echo otool lib2b
       otool -L out/lib2/lib2b.dylib
 
+      popd
       #exit
 
       export LIBTOOLIZE=glibtoolize
