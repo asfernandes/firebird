@@ -64,7 +64,7 @@ script:
       echo otool lib2b
       otool -L out/lib2/lib2b.dylib
 
-      exit
+      #exit
 
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
