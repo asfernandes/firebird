@@ -128,8 +128,8 @@ framework darwin_finish_framework:
 	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Resources/lib/libicui18n.dylib
 	cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Resources/lib/libicuuc.dylib
 	cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Resources/lib/libib_util.dylib
-	ln -s $(FB_FW)/Versions/A/Libraries/libfbclient.dylib ../Resources/lib/libfbclient.dylib
-	ln -s $(FB_FW)/Versions/A/Libraries/libib_util.dylib ../Resources/lib/libib_util.dylib
+	ln -s ../Resources/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
+	ln -s ../Resources/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
 
 	mkdir -p $(FB_FW)/Versions/A/Resources/English.lproj
 	mkdir -p $(FB_FW)/Versions/A/Resources/UDF
