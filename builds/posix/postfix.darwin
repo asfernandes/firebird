@@ -99,6 +99,7 @@ framework darwin_setup_framework:
 	ln -s ../../../lib $(FB_FW)/Versions/A/Libraries
 	ln -s ../../../../../../firebird.msg $(FB_FW)/Resources/firebird.msg
 	ln -s ../../../../../../bin $(FB_FW)/Resources/bin
+	ln -s ../../../../../../lib $(FB_FW)/Resources/lib
 	ln -s ../../../../../../UDF $(FB_FW)/Resources/UDF
 	ln -s ../../../../../../intl $(FB_FW)/Resources/intl
 	ln -s ../../../../../../plugins $(FB_FW)/Resources/plugins
