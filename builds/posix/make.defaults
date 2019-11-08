@@ -304,7 +304,7 @@ endif
 
 ifeq ($(PLATFORM),DARWIN)
     LINK_DARWIN_RPATH = -Wl,-rpath,@loader_path/$(1)
-    LIB_LINK_DARWIN_INSTALL_NAME = - install_name @rpath/$(1)
+    LIB_LINK_DARWIN_INSTALL_NAME = -install_name @rpath/$(1)
 else
     LINK_DARWIN_RPATH =
     LIB_LINK_DARWIN_INSTALL_NAME =
