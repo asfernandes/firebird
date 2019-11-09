@@ -145,7 +145,7 @@ framework darwin_finish_framework:
 	mkdir -p $(FB_FW)/Versions/A/Resources/intl
 	cp -r ../gen/$(TARGET)/firebird/intl/libfbintl.dylib $(FB_FW)/Versions/A/Resources/intl/libfbintl.dylib
 	cp ../gen/$(TARGET)/firebird/intl/fbintl.conf $(FB_FW)/Versions/A/Resources/intl/fbintl.conf
-	chmod a+rx $(FB_FW)/Versions/A/Resources/intl/fbintl
+	#chmod a+rx $(FB_FW)/Versions/A/Resources/intl/fbintl
 	cp -r ../gen/$(TARGET)/firebird/plugins $(FB_FW)/Versions/A/Resources/plugins
 	cp ../gen/$(TARGET)/firebird/security3.fdb $(FB_FW)/Versions/A/Resources/security3.fdb
 	cp ../gen/$(TARGET)/firebird/firebird.msg $(FB_FW)/Versions/A/Resources/firebird.msg
