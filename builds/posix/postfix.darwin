@@ -127,11 +127,12 @@ framework darwin_finish_framework:
 	#cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
 
 	mkdir -p $(FB_FW)/Versions/A/Resources/lib
-	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Resources/lib/libfbclient.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Resources/lib/libicudata.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Resources/lib/libicui18n.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Resources/lib/libicuuc.dylib
-	cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Resources/lib/libib_util.dylib
+	cp ../gen/$(TARGET)/firebird/lib/libtommath.dylib $(FB_FW)/Versions/A/Resources/lib/
+	cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Resources/lib/
+	cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Resources/lib/
+	cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Resources/lib/
+	cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Resources/lib/
+	cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Resources/lib/
 	ln -s ../Resources/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
 	ln -s ../Resources/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
 
