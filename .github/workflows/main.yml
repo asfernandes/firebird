@@ -53,12 +53,12 @@ jobs:
         ./runConfigureICU MacOSX --prefix=$ICU_INSTALL_PATH
         make -j4
         make install
-        install_name_tool -id @rpath/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
-        install_name_tool -id @rpath/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
-        install_name_tool -id @rpath/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
-        install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
-        install_name_tool -change libicudata.59.dylib @rpath/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
-        install_name_tool -change libicuuc.59.dylib @rpath/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+        install_name_tool -id @rpath/lib/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
+        install_name_tool -id @rpath/lib/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
+        install_name_tool -id @rpath/lib/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
+        install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
+        install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+        install_name_tool -change libicuuc.59.dylib @loader_path/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
         popd
         mkdir -p gen/Release/firebird/lib
         mkdir -p gen/Debug/firebird/lib
@@ -83,7 +83,9 @@ jobs:
         (cd gen; make -B -f Makefile.install)
 
         sudo installer -pkg gen/Release/*.pkg -verbose -target /
-        find /Library/Frameworks/Firebird.framework
+
+        mv gen gen2
+        echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
 
         mkdir gen/artifacts
         mv gen/Release/*.pkg gen/artifacts
