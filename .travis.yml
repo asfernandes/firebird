@@ -90,12 +90,12 @@ script:
       install_name_tool -id @rpath/lib/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicuuc.dylib
       install_name_tool -id @rpath/lib/libicui18n.dylib $ICU_INSTALL_PATH/lib/libicui18n.dylib
       install_name_tool -id @rpath/lib/libicudata.dylib $ICU_INSTALL_PATH/lib/libicudata.dylib
-      #install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
-      #install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
-      #install_name_tool -change libicuuc.59.dylib @loader_path/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
-      install_name_tool -change libicudata.59.dylib @loader_path/libicudata.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
-      install_name_tool -change libicudata.59.dylib @loader_path/libicudata.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
-      install_name_tool -change libicuuc.59.dylib @loader_path/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+      install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
+      install_name_tool -change libicudata.59.dylib @loader_path/libicudata.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+      install_name_tool -change libicuuc.59.dylib @loader_path/libicuuc.59.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+      #install_name_tool -change libicudata.59.dylib @loader_path/libicudata.dylib $ICU_INSTALL_PATH/lib/libicuuc.59.dylib
+      #install_name_tool -change libicudata.59.dylib @loader_path/libicudata.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
+      #install_name_tool -change libicuuc.59.dylib @loader_path/libicuuc.dylib $ICU_INSTALL_PATH/lib/libicui18n.59.dylib
       popd
       mkdir -p gen/Release/firebird/lib
       mkdir -p gen/Debug/firebird/lib
