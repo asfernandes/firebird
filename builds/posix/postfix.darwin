@@ -87,24 +87,24 @@ intl:
 udf:
 	install_name_tool -change $(OLDFBCLIENT) $(NEWFBCLIENT) $(UDFLOC)fbudf.dylib
 
-framework darwin_setup_framework:
-	-$(RM) -rf $(FB_FW)
-	mkdir -p $(FB_FW)/Versions/A/Libraries
-	ln -s Versions/Current/Firebird $(FB_FW)/Firebird
-	ln -s Versions/Current/Headers $(FB_FW)/Headers
-	ln -s Versions/Current/Resources $(FB_FW)/Resources
-	ln -s Versions/Current/Libraries $(FB_FW)/Libraries
-	ln -s A $(FB_FW)/Versions/Current
-	ln -s ../../../include $(FB_FW)/Versions/A/Headers
-	ln -s ../../../lib $(FB_FW)/Versions/A/Libraries
-	ln -s ../../../../../../firebird.msg $(FB_FW)/Resources/firebird.msg
-	ln -s ../../../../../../bin $(FB_FW)/Resources/bin
-	ln -s ../../../../../../lib $(FB_FW)/Resources/lib
-	ln -s ../../../../../../UDF $(FB_FW)/Resources/UDF
-	ln -s ../../../../../../intl $(FB_FW)/Resources/intl
-	ln -s ../../../../../../plugins $(FB_FW)/Resources/plugins
-	ln -s ../../../../../../security3.fdb $(FB_FW)/Resources/security3.fdb
-	ln -s ../../../../../../help $(FB_FW)/Resources/help
+#framework darwin_setup_framework:
+#	-$(RM) -rf $(FB_FW)
+#	mkdir -p $(FB_FW)/Versions/A/Libraries
+#	ln -s Versions/Current/Firebird $(FB_FW)/Firebird
+#	ln -s Versions/Current/Headers $(FB_FW)/Headers
+#	ln -s Versions/Current/Resources $(FB_FW)/Resources
+#	ln -s Versions/Current/Libraries $(FB_FW)/Libraries
+#	ln -s A $(FB_FW)/Versions/Current
+#	ln -s ../../../include $(FB_FW)/Versions/A/Headers
+#	ln -s ../../../lib $(FB_FW)/Versions/A/Libraries
+#	ln -s ../../../../../../firebird.msg $(FB_FW)/Resources/firebird.msg
+#	ln -s ../../../../../../bin $(FB_FW)/Resources/bin
+#	ln -s ../../../../../../lib $(FB_FW)/Resources/lib
+#	ln -s ../../../../../../UDF $(FB_FW)/Resources/UDF
+#	ln -s ../../../../../../intl $(FB_FW)/Resources/intl
+#	ln -s ../../../../../../plugins $(FB_FW)/Resources/plugins
+#	ln -s ../../../../../../security3.fdb $(FB_FW)/Resources/security3.fdb
+#	ln -s ../../../../../../help $(FB_FW)/Resources/help
 
 framework darwin_finish_framework: FB_FW = ../gen/$(TARGET)/frameworks/Firebird3.framework
 framework darwin_finish_framework:
@@ -119,12 +119,6 @@ framework darwin_finish_framework:
 	ln -s Versions/Current/Libraries $(FB_FW)/Libraries
 	ln -s A $(FB_FW)/Versions/Current
 	cp -r ../gen/$(TARGET)/firebird/include $(FB_FW)/Versions/A/Headers
-	#cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Firebird
-	#cp ../gen/$(TARGET)/firebird/lib/libfbclient.dylib $(FB_FW)/Versions/A/Libraries/libfbclient.dylib
-	#cp ../gen/$(TARGET)/firebird/lib/libicudata.dylib $(FB_FW)/Versions/A/Libraries/libicudata.dylib
-	#cp ../gen/$(TARGET)/firebird/lib/libicui18n.dylib $(FB_FW)/Versions/A/Libraries/libicui18n.dylib
-	#cp ../gen/$(TARGET)/firebird/lib/libicuuc.dylib $(FB_FW)/Versions/A/Libraries/libicuuc.dylib
-	#cp ../gen/$(TARGET)/firebird/lib/libib_util.dylib $(FB_FW)/Versions/A/Libraries/libib_util.dylib
 
 	mkdir -p $(FB_FW)/Versions/A/Resources/lib
 	cp ../gen/$(TARGET)/firebird/lib/libtommath.dylib $(FB_FW)/Versions/A/Resources/lib/
@@ -186,3 +180,6 @@ framework darwin_finish_framework:
 	mkdir $(FB_FW)/Versions/A/Resources/misc
 	mkdir $(FB_FW)/Versions/A/Resources/misc/upgrade
 	cp -r ../src/misc/upgrade/v3.0 $(FB_FW)/Versions/A/Resources/misc/upgrade
+
+	install_name_tool -rpath @loader_path/.. /Library/Frameworks/Firebird.framework/Resources $(FB_FW)/Versions/A/Resources/bin/firebird
+	install_name_tool -id /Library/Frameworks/Firebird.framework/Libraries/libfbclient.dylib $(FB_FW)/Versions/A/Resources/lib/libfbclient.dylib
