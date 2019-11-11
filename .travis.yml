@@ -110,4 +110,10 @@ script:
       sleep 8
       sudo ps aux |grep fbguard
       sudo ps aux |grep firebird
+
+      sleep 8
+      sudo ps aux |grep fbguard
+      sudo ps aux |grep firebird
+
+      echo "create database 'localhost:/tmp/t.fdb' user sysdba password 'masterkey'; select '11' from rdb\$database; select _win1252 '22' from rdb\$database; select _utf8 '33' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
     fi
