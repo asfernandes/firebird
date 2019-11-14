@@ -105,7 +105,8 @@ script:
       mv gen gen2
       sudo installer -pkg gen2/Release/*.pkg -verbose -target /
 
-      sudo dseditgroup -o edit -a `whoami` -t user firebird
+      sudo dseditgroup -o edit -a $USER -t user firebird
+      newgrp firebird
 
       echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
 
