@@ -8,19 +8,14 @@ jobs:
 
     strategy:
       matrix:
-        #os: [ubuntu-16.04, windows-2016]
-        #os: [windows-2016, macOS-latest]
-        #os: [macOS-latest]
-        #os: [ubuntu-16.04]
-        os: [macOS-latest, ubuntu-16.04, windows-2016]
+        # ubuntu-16.04 is segfaulting
+        #os: [macOS-latest, windows-2016, ubuntu-16.04]
+        os: [macOS-latest, windows-2016]
 
     steps:
     - uses: actions/checkout@v1
       with:
         fetch-depth: 10
-
-    #- name: Debug session
-    #  uses: uavos/action-tmate@v1
 
     - name: Prepare (Linux)
       if: matrix.os == 'ubuntu-16.04'
@@ -85,9 +80,6 @@ jobs:
 
         mv gen gen2
         sudo installer -pkg gen2/Release/*.pkg -verbose -target /
-
-        #sudo dseditgroup -o edit -a $USER -t user firebird
-        #newgrp firebird
 
         export FIREBIRD_LOCK=`pwd`/temp
         echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql

@@ -32,6 +32,7 @@ script:
     fi
 
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+      # FIXME:
       pushd tests
       mkdir -p out/exe out/lib1 out/lib2
       gcc -dynamiclib lib1.cpp -install_name @rpath/lib1/lib1.dylib -o out/lib1/lib1.dylib
@@ -105,19 +106,8 @@ script:
       mv gen gen2
       sudo installer -pkg gen2/Release/*.pkg -verbose -target /
 
-      #sudo dseditgroup -o edit -a $USER -t user firebird
-      #newgrp firebird
-
       export FIREBIRD_LOCK=`pwd`/temp
       echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
-
-      #sleep 8
-      #sudo ps aux |grep fbguard
-      #sudo ps aux |grep firebird
-
-      #sleep 8
-      #sudo ps aux |grep fbguard
-      #sudo ps aux |grep firebird
 
       echo "create database 'localhost:/tmp/t.fdb' user sysdba password 'masterkey'; select '11' from rdb\$database; select _win1252 '22' from rdb\$database; select _utf8 '33' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
     fi
