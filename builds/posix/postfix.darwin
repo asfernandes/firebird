@@ -19,14 +19,13 @@
 # 2 Oct 2002, Nickolay Samofatov - Major Cleanup
 
 TARGET ?= Release
-FB_FW = ../gen/$(TARGET)/Firebird.framework
 ICU_VERS = icu54
 ICU_LOC ?= $(HOME)/$(ICU_VERS)/icu/source/lib/
+FB_FW = ../gen/$(TARGET)/frameworks/Firebird3.framework
 
 all: framework
 
-framework darwin_finish_framework: FB_FW = ../gen/$(TARGET)/frameworks/Firebird3.framework
-framework darwin_finish_framework:
+framework:
 	-$(RM) -rf $(FB_FW)
 	mkdir -p $(FB_FW)/Versions/A/Libraries
 
