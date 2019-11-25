@@ -12,12 +12,12 @@ jobs:
         # ubuntu-16.04 is segfaulting
         #os: [macOS-latest, windows-2016, ubuntu-16.04]
         os: [macOS-latest, windows-2016]
-        platform: [x64, x32]
+        platform: [x64, x86]
         exclude:
           - os: macOS-latest
-            platform: x32
+            platform: x86
           #- os: ubuntu-16.04
-          #  platform: x32
+          #  platform: x86
 
     steps:
     - uses: actions/checkout@v1
@@ -107,6 +107,8 @@ jobs:
     - name: Build (Windows)
       if: matrix.os == 'windows-2016'
       shell: cmd
+      env:
+        PLATFORM: ${{ matrix.platform }}
       run: |
         set
         if "%PLATFORM%" == "x64" set FB_PROCESSOR_ARCHITECTURE=AMD64
@@ -114,7 +116,7 @@ jobs:
         if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
         if "%PLATFORM%" == "x86" set FB_OUTPUT_SUFFIX=win32
         set
-        #call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64
+        REM call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64
         call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=%FB_PROCESSOR_ARCHITECTURE%
         cd builds\win32
         run_all.bat JUSTBUILD
