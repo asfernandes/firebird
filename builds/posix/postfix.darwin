@@ -26,8 +26,6 @@ ICU_LOC ?= $(HOME)/$(ICU_VERS)/icu/source/lib/
 all: framework
 
 framework darwin_finish_framework:
-	FB_FW = ../gen/$(TARGET)/frameworks/Firebird3.framework
-
 	-$(RM) -rf $(FB_FW)
 	mkdir -p $(FB_FW)/Versions/A/Libraries
 
