@@ -256,12 +256,14 @@ private:
 		getEntryPoint("ucnv_setFromUCallBack", module, ucnv_setFromUCallBack);
 		getEntryPoint("ucnv_setToUCallBack", module, ucnv_setToUCallBack);
 
+#if defined(WIN_NT) || defined(DARWIN)
 		if (uSetDataDirectory)
 		{
 			PathName path, file;
 			PathUtils::splitLastComponent(path, file, module->fileName);
 			uSetDataDirectory(path.c_str());
 		}
+#endif
 
 		if (uInit)
 		{
@@ -1044,12 +1046,14 @@ UnicodeUtil::ICU* UnicodeUtil::loadICU(const string& icuVersion, const string& c
 			continue;
 		}
 
+#if defined(WIN_NT) || defined(DARWIN)
 		if (icu->uSetDataDirectory)
 		{
 			PathName path, file;
 			PathUtils::splitLastComponent(path, file, icu->ucModule->fileName);
 			icu->uSetDataDirectory(path.c_str());
 		}
+#endif
 
 		UErrorCode status = U_ZERO_ERROR;
 
