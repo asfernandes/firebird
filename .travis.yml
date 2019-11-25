@@ -103,6 +103,7 @@ script:
       (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
       (cd gen; make -B -f Makefile.install)
 
+      # Rename directory to make sure the build is relocatable.
       mv gen gen2
       sudo installer -pkg gen2/Release/*.pkg -verbose -target /
 

@@ -1,16 +1,23 @@
 name: CI
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         # ubuntu-16.04 is segfaulting
         #os: [macOS-latest, windows-2016, ubuntu-16.04]
         os: [macOS-latest, windows-2016]
+        platform: [x64, x32]
+        exclude:
+          - os: macOS-latest
+            platform: x32
+          #- os: ubuntu-16.04
+          #  platform: x32
 
     steps:
     - uses: actions/checkout@v1
@@ -78,6 +85,7 @@ jobs:
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 
+        # Rename directory to make sure the build is relocatable.
         mv gen gen2
         sudo installer -pkg gen2/Release/*.pkg -verbose -target /
 
@@ -100,7 +108,14 @@ jobs:
       if: matrix.os == 'windows-2016'
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64
+        set
+        if "%PLATFORM%" == "x64" set FB_PROCESSOR_ARCHITECTURE=AMD64
+        if "%PLATFORM%" == "x64" set FB_OUTPUT_SUFFIX=x64
+        if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
+        if "%PLATFORM%" == "x86" set FB_OUTPUT_SUFFIX=win32
+        set
+        #call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=%FB_PROCESSOR_ARCHITECTURE%
         cd builds\win32
         run_all.bat JUSTBUILD
 
@@ -118,9 +133,16 @@ jobs:
         name: firebird-macos
         path: gen/artifacts
 
-    - name: Upload (Windows)
-      if: matrix.os == 'windows-2016'
+    - name: Upload (Windows x64)
+      if: matrix.os == 'windows-2016' && matrix.platform == 'x64'
       uses: actions/upload-artifact@master
       with:
-        name: firebird-windows
+        name: firebird-windows-x64
         path: output_x64
+
+    - name: Upload (Windows x86)
+      if: matrix.os == 'windows-2016' && matrix.platform == 'x86'
+      uses: actions/upload-artifact@master
+      with:
+        name: firebird-windows-x86
+        path: output_win32
