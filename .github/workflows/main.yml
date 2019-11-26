@@ -10,8 +10,8 @@ jobs:
       fail-fast: false
       matrix:
         # ubuntu-18.10 is segfaulting
-        #os: [macOS-latest, windows-2016, ubuntu-18.10]
-        os: [macOS-latest, windows-2016]
+        os: [macOS-latest, windows-2016, ubuntu-18.10]
+        #os: [macOS-latest, windows-2016]
         platform: [x64, x86]
         exclude:
           - os: macOS-latest
