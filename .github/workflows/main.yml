@@ -9,14 +9,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-16.04 is segfaulting
-        #os: [macOS-latest, windows-2016, ubuntu-16.04]
+        # ubuntu-18.10 is segfaulting
+        #os: [macOS-latest, windows-2016, ubuntu-18.10]
         os: [macOS-latest, windows-2016]
         platform: [x64, x86]
         exclude:
           - os: macOS-latest
             platform: x86
-          #- os: ubuntu-16.04
+          #- os: ubuntu-18.10
           #  platform: x86
 
     steps:
@@ -25,12 +25,12 @@ jobs:
         fetch-depth: 10
 
     - name: Prepare (Linux)
-      if: matrix.os == 'ubuntu-16.04'
+      if: matrix.os == 'ubuntu-18.10'
       run: |
         sudo apt-get install libtool-bin libtommath0 libtommath-dev libicu-dev zlib1g-dev
 
     - name: Build (Linux)
-      if: matrix.os == 'ubuntu-16.04'
+      if: matrix.os == 'ubuntu-18.10'
       run: |
         CC=clang CXX=clang++ ./autogen.sh --enable-binreloc --with-builtin-tomcrypt --prefix=/opt/firebird
         make
@@ -122,7 +122,7 @@ jobs:
         run_all.bat JUSTBUILD
 
     - name: Upload (Linux)
-      if: matrix.os == 'ubuntu-16.04'
+      if: matrix.os == 'ubuntu-18.10'
       uses: actions/upload-artifact@master
       with:
         name: firebird-linux
