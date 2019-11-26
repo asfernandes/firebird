@@ -27,7 +27,7 @@ jobs:
     - name: Prepare (Linux)
       if: matrix.os == 'ubuntu-18.04'
       run: |
-        sudo apt-get install libtool-bin libtommath0 libtommath-dev libicu-dev zlib1g-dev
+        sudo apt-get install libtool-bin libtommath1 libtommath-dev libicu-dev zlib1g-dev
 
     - name: Build (Linux)
       if: matrix.os == 'ubuntu-18.04'
