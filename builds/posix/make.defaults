@@ -287,7 +287,6 @@ LINK_PLUGIN_SYMBOLS = $(call LIB_LINK_MAPFILE,$(PLUGIN_VERS))
 LINK_EXEC_EXPORT=-rdynamic
 
 ifeq ($(PLATFORM),DARWIN)
-    #LIB_LINK_RPATH = -Wl,-rpath,@executable_path/../$(1)
     LIB_LINK_RPATH =
 else
 LIB_PLATFORM_RPATH = -Wl,-rpath,$(1)
