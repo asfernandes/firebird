@@ -32,42 +32,6 @@ script:
     fi
 
     if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-      # FIXME:
-      pushd tests
-      mkdir -p out/exe out/lib1 out/lib2
-      gcc -dynamiclib lib1.cpp -install_name @rpath/lib1/lib1.dylib -o out/lib1/lib1.dylib
-      gcc -dynamiclib lib2.cpp -install_name @rpath/lib2/lib2.dylib -o out/lib2/lib2.dylib -Lout/lib1 -l1
-      gcc exe1.cpp -Wl,-rpath,@executable_path/.. -o out/exe/exe1.out -Lout/lib2 -l2
-      gcc exe1.cpp -Wl,-rpath,@loader_path/.. -o out/exe/exe2.out -Lout/lib2 -l2
-      echo echo exe1
-      ./out/exe/exe1.out
-      echo echo exe2
-      ./out/exe/exe2.out
-      echo otool exe1
-      otool -L out/exe/exe1.out
-      echo otool exe2
-      otool -L out/exe/exe2.out
-      echo otool lib1
-      otool -L out/lib1/lib1.dylib
-      echo otool lib2
-      otool -L out/lib2/lib2.dylib
-
-      gcc -dynamiclib lib1.cpp -install_name @rpath/lib1b.dylib -o out/lib1/lib1b.dylib
-      gcc -dynamiclib lib2.cpp -Wl,-rpath,@loader_path/../lib1 -install_name @rpath/lib2b.dylib -o out/lib2/lib2b.dylib -Lout/lib1 -l1b
-      gcc exe1.cpp -Wl,-rpath,@loader_path/../lib2 -o out/exe/exe3.out -Lout/lib2 -l2b
-
-      echo echo exe3
-      ./out/exe/exe3.out
-      echo otool exe3
-      otool -L out/exe/exe3.out
-      echo otool lib1b
-      otool -L out/lib1/lib1b.dylib
-      echo otool lib2b
-      otool -L out/lib2/lib2b.dylib
-
-      popd
-      #exit
-
       export LIBTOOLIZE=glibtoolize
       export LIBTOOL=glibtool
 
