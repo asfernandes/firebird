@@ -1,0 +1,34 @@
+name: tzdata-update
+
+on:
+  schedule:
+    # FIXME:
+    - cron:  '15 * * * *'
+
+jobs:
+  tzdata-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Checkout ICU
+        run: git clone --depth 1 https://github.com/unicode-org/icu-data.git -b master icu-checkout
+
+      - name: Update
+        run: |
+          VERSION=`ls icu-checkout/icu-data/tzdata/icunew/ -r1a |head -1`
+          if [ "$VERSION" == "`cat tzdata/version.txt`" ]
+          then
+            exit
+          fi
+
+          echo $VERSION > tzdata/version.txt
+          tzdata/update.sh
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Updata tzdata.
+          title: 'Updata tzdata.'
