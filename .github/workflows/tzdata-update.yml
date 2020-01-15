@@ -3,7 +3,7 @@ name: tzdata-update
 on:
   schedule:
     # FIXME:
-    - cron: '23 * * * *'
+    - cron: '40 * * * *'
 
 jobs:
   tzdata-update:
@@ -17,13 +17,7 @@ jobs:
 
       - name: Check and update
         run: |
-          echo a1
-          ls /tmp/icu-checkout/tzdata/icunew/
-          echo a2
-          ls /tmp/icu-checkout/tzdata/icunew/ -r1a |head -1
           VERSION=`ls /tmp/icu-checkout/tzdata/icunew/ -r1a |head -1`
-          echo a3
-          echo $VERSION
           if [ "$VERSION" == "`cat tzdata/version.txt`" ]
           then
             exit
@@ -31,8 +25,10 @@ jobs:
 
           echo $VERSION > tzdata/version.txt
           tzdata/update.sh
+          export CREATE_PR=1
 
       - name: Create Pull Request
+        if: env.CREATE_PR == '1'
         uses: peter-evans/create-pull-request@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
