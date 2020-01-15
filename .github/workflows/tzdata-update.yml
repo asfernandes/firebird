@@ -3,7 +3,7 @@ name: tzdata-update
 on:
   schedule:
     # FIXME:
-    - cron: '40 * * * *'
+    - cron: '29 * * * *'
 
 jobs:
   tzdata-update:
