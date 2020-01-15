@@ -3,7 +3,7 @@ name: tzdata-update
 on:
   schedule:
     # FIXME:
-    #- cron: '34 * * * *'
+    - cron: '34 * * * *'
 
 jobs:
   tzdata-update:
@@ -35,4 +35,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Updata tzdata.
-          title: 'Updata tzdata.'
+          title: Updata tzdata.
