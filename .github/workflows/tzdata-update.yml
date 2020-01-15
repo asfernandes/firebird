@@ -3,7 +3,7 @@ name: tzdata-update
 on:
   schedule:
     # FIXME:
-    - cron: '34 * * * *'
+    - cron: '23 * * * *'
 
 jobs:
   tzdata-update:
@@ -12,14 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Checkout ICU
+        run: git clone --depth 1 https://github.com/unicode-org/icu-data.git -b master /tmp/icu-checkout
+
       - name: Check and update
         run: |
-          git clone --depth 1 https://github.com/unicode-org/icu-data.git -b master /tmp/icu-checkout
           echo a1
-          ls /tmp/icu-checkout/icu-data/tzdata/icunew/
+          ls /tmp/icu-checkout/tzdata/icunew/
           echo a2
-          ls /tmp/icu-checkout/icu-data/tzdata/icunew/ -r1a |head -1
-          VERSION=`ls /tmp/icu-checkout/icu-data/tzdata/icunew/ -r1a |head -1`
+          ls /tmp/icu-checkout/tzdata/icunew/ -r1a |head -1
+          VERSION=`ls /tmp/icu-checkout/tzdata/icunew/ -r1a |head -1`
           echo a3
           echo $VERSION
           if [ "$VERSION" == "`cat tzdata/version.txt`" ]
