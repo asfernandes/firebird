@@ -3,7 +3,7 @@ name: tzdata-update
 on:
   schedule:
     # FIXME:
-    - cron: '29 * * * *'
+    - cron: '59 * * * *'
 
 jobs:
   tzdata-update:
@@ -25,10 +25,8 @@ jobs:
 
           echo $VERSION > tzdata/version.txt
           tzdata/update.sh
-          export CREATE_PR=1
 
       - name: Create Pull Request
-        if: env.CREATE_PR == '1'
         uses: peter-evans/create-pull-request@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
