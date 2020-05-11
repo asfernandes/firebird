@@ -101,6 +101,7 @@ jobs:
         find /Library/Frameworks/Firebird.framework
         ls -l /Library/Frameworks/Firebird.framework
         ls -l /Library/Frameworks/Firebird.framework/Versions/Current
+        ls -l /Library/Frameworks/Firebird.framework/Versions/Current/
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
