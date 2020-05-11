@@ -99,6 +99,8 @@ jobs:
         mv gen/Release/*.pkg gen/artifacts
 
         find /Library/Frameworks/Firebird.framework
+        ls -l /Library/Frameworks/Firebird.framework
+        ls -l /Library/Frameworks/Firebird.framework/Current
 
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
