@@ -98,6 +98,8 @@ jobs:
         mkdir gen/artifacts
         mv gen/Release/*.pkg gen/artifacts
 
+        find /Library/Frameworks/Firebird.framework
+
     - name: Prepare (Windows)
       if: matrix.os == 'windows-2016'
       shell: cmd
