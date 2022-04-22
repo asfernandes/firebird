@@ -517,10 +517,12 @@ static ModuleLoader::Module* formatAndLoad(const char* templateName,
 		// ICU has several schemas for placing version into file name
 		const char* const patterns[] =
 		{
+#ifdef WIN_NT
+			"%d",
+#endif
 			"%d_%d",
 			"%d.%d",
-			"%d%d",
-			"%d"
+			"%d%d"
 		};
 
 		PathName s, filename;
@@ -533,6 +535,18 @@ static ModuleLoader::Module* formatAndLoad(const char* templateName,
 			if (module)
 				break;
 		}
+
+#ifndef WIN_NT
+		// There is no sence to try pattern "%d" for different minor versions
+		// ASF: In Windows ICU 63.1 libraries use 63.dll suffix. This is handled in 'patterns' above.
+		if (!module && minorVersion == 0)
+		{
+			s.printf("%d", majorVersion);
+			filename.printf(templateName, s.c_str());
+
+			module = ModuleLoader::fixAndLoadModule(NULL, filename);
+		}
+#endif
 	}
 
 	return module;

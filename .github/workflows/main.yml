@@ -129,8 +129,6 @@ jobs:
         LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH" ./autogen.sh --with-builtin-tommath --with-builtin-tomcrypt
         make -j4
 
-        echo "create database 't0.fdb'; show system collation; select '01' from rdb\$database; select _win1252 '02' from rdb\$database; select _utf8 '03' collate unicode from rdb\$database;" | ./gen/Release/firebird/bin/isql
-
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
 
@@ -139,7 +137,7 @@ jobs:
         sudo installer -pkg gen2/Release/*.pkg -verbose -target /
 
         export FIREBIRD_LOCK=`pwd`/temp
-        echo "create database 't.fdb'; show system collation; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
+        echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
 
         echo "create database 'localhost:/tmp/t.fdb' user sysdba password 'masterkey'; select '11' from rdb\$database; select _win1252 '22' from rdb\$database; select _utf8 '33' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
 
