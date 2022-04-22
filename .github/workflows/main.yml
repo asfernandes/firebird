@@ -129,7 +129,7 @@ jobs:
         LIBRARY_PATH="$ICU_INSTALL_PATH/lib:$LIBRARY_PATH" ./autogen.sh --with-builtin-tommath --with-builtin-tomcrypt
         make -j4
 
-        echo "create database 't0.fdb'; show system collation; select '01' from rdb\$database; select _win1252 '02' from rdb\$database; select _utf8 '03' collate unicode from rdb\$database;" | ./gen/Debug/firebird/bin/isql
+        echo "create database 't0.fdb'; show system collation; select '01' from rdb\$database; select _win1252 '02' from rdb\$database; select _utf8 '03' collate unicode from rdb\$database;" | ./gen/Release/firebird/bin/isql
 
         (cd gen; make -B -f make.platform.postfix ICU_LOC="$ICU_INSTALL_PATH/lib/")
         (cd gen; make -B -f Makefile.install)
