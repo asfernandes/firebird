@@ -517,10 +517,10 @@ static ModuleLoader::Module* formatAndLoad(const char* templateName,
 		// ICU has several schemas for placing version into file name
 		const char* const patterns[] =
 		{
-			"%d",
 			"%d_%d",
 			"%d.%d",
-			"%d%d"
+			"%d%d",
+			"%d"
 		};
 
 		PathName s, filename;
