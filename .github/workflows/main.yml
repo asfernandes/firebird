@@ -52,10 +52,12 @@ jobs:
 
       - name: Snapshot - prepare
         id: snapshot_prepare
+        # FIXME: github.event.head_commit.message == 'increment build number'
+        # FIXME: branch names
         if: |
-          github.repository == 'FirebirdSQL/firebird' &&
-          github.event.head_commit.message == 'increment build number' &&
-          github.ref_name == 'master'
+          github.repository == 'asfernandes/firebird' &&
+          (github.event.head_commit.message == 'increment build number' || true) &&
+          github.ref_name == 'work/snapshots'
         run: |
           echo "::set-output name=snapshot_name::${{ github.ref_name }}"
 
@@ -120,10 +122,12 @@ jobs:
 
       - name: Snapshot - prepare
         id: snapshot_prepare
+        # FIXME: github.event.head_commit.message == 'increment build number'
+        # FIXME: branch names
         if: |
-          github.repository == 'FirebirdSQL/firebird' &&
-          github.event.head_commit.message == 'increment build number' &&
-          github.ref_name == 'master'
+          github.repository == 'asfernandes/firebird' &&
+          (github.event.head_commit.message == 'increment build number' || true) &&
+          github.ref_name == 'work/snapshots'
         run: |
           echo "::set-output name=snapshot_name::${{ github.ref_name }}"
 
@@ -299,10 +303,12 @@ jobs:
 
       - name: Snapshot - prepare
         id: snapshot_prepare
+        # FIXME: github.event.head_commit.message == 'increment build number'
+        # FIXME: branch names
         if: |
-          github.repository == 'FirebirdSQL/firebird' &&
-          github.event.head_commit.message == 'increment build number' &&
-          github.ref_name == 'master'
+          github.repository == 'asfernandes/firebird' &&
+          (github.event.head_commit.message == 'increment build number' || true) &&
+          github.ref_name == 'work/snapshots'
         shell: cmd
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -485,10 +491,12 @@ jobs:
 
       - name: Snapshot - prepare
         id: snapshot_prepare
+        # FIXME: github.event.head_commit.message == 'increment build number'
+        # FIXME: branch names
         if: |
-          github.repository == 'FirebirdSQL/firebird' &&
-          github.event.head_commit.message == 'increment build number' &&
-          github.ref_name == 'master'
+          github.repository == 'asfernandes/firebird' &&
+          (github.event.head_commit.message == 'increment build number' || true) &&
+          github.ref_name == 'work/snapshots'
         run: |
           echo "::set-output name=snapshot_name::${{ github.ref_name }}"
 
