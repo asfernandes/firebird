@@ -276,9 +276,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
-          if "%PLATFORM%" == "x64" set FB_OUTPUT_SUFFIX=x64
-          if "%PLATFORM%" == "x86" set FB_OUTPUT_SUFFIX=Win32
-          echo ::set-output name=arch_suffix::%FB_OUTPUT_SUFFIX%
+          echo ::set-output name=arch_suffix::%PLATFORM%
           mkdir builds\install_images
           cd builds\docker\windows
           call build.bat
@@ -321,8 +319,8 @@ jobs:
           fail-if-no-release: false
           fail-if-no-assets: false
           assets: |
-            Firebird-*${{ steps.build.outputs.arch_suffix }}*.exe
-            Firebird-*${{ steps.build.outputs.arch_suffix }}*.zip
+            Firebird-*windows-${{ steps.build.outputs.arch_suffix }}*.exe
+            Firebird-*windows-${{ steps.build.outputs.arch_suffix }}*.zip
 
       - name: Snapshot - release
         id: snapshot_release_try1
@@ -336,8 +334,8 @@ jobs:
           prerelease: true
           token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
           files: |
-            builds/install_images/Firebird-*.exe
-            builds/install_images/Firebird-*.zip
+            builds/install_images/Firebird-*windows-*.exe
+            builds/install_images/Firebird-*windows-*.zip
 
       - name: Snapshot - release (retry)
         uses: softprops/action-gh-release@v1
@@ -351,8 +349,8 @@ jobs:
           prerelease: true
           token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
           files: |
-            builds/install_images/Firebird-*.exe
-            builds/install_images/Firebird-*.zip
+            builds/install_images/Firebird-*windows-*.exe
+            builds/install_images/Firebird-*windows-*.zip
 
   build-macos:
     runs-on: macos-latest
