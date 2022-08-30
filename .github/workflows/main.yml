@@ -250,7 +250,7 @@ jobs:
           if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
           call "%VS_SCRIPT%" -arch=%FB_VS_ARCH%
           cd builds\win32
-          call run_all.bat PDB
+          call run_all.bat
           call run_tests.bat
 
       - name: Upload zip
@@ -259,23 +259,11 @@ jobs:
           name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-zip
           path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}.zip
 
-      - name: Upload zip (withDebugSymbols)
-        uses: actions/upload-artifact@main
-        with:
-          name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-withDebugSymbols-zip
-          path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}-withDebugSymbols.zip
-
       - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-installer
           path: builds/install_images/*-windows-${{ matrix.platform }}.exe
-
-      - name: Upload installer (withDebugSymbols)
-        uses: actions/upload-artifact@main
-        with:
-          name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-withDebugSymbols-installer
-          path: builds/install_images/*-windows-${{ matrix.platform }}-withDebugSymbols.exe
 
   build-windows-docker:
     runs-on: windows-2022
