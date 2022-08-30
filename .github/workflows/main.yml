@@ -27,7 +27,7 @@ jobs:
           tar xzvf gen/Firebird-*-linux-x64.tar.gz
           (cd Firebird-*-linux-x64; sudo ./install.sh -silent)
 
-      - name: Upload
+      - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-ubuntu-20.04-clang-x64
@@ -46,11 +46,17 @@ jobs:
       - name: Build
         run: /entry.sh
 
-      - name: Upload
+      - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-linux-x64
-          path: gen/Firebird-*-linux-x64*.tar.gz
+          path: gen/Firebird-*-linux-x64.tar.gz
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@main
+        with:
+          name: firebird-linux-x64-debugSymbols
+          path: gen/Firebird-*-linux-x64-debugSymbols.tar.gz
 
       - name: Snapshot - prepare
         id: snapshot_prepare
@@ -115,11 +121,17 @@ jobs:
           cd builds/docker/linux/i586-x86_64
           ./run-i586.sh
 
-      - name: Upload
+      - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-linux-x86
-          path: gen/Firebird-*-linux-x86*.tar.gz
+          path: gen/Firebird-*-linux-x86.tar.gz
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@main
+        with:
+          name: firebird-linux-x86-debugSymbols
+          path: gen/Firebird-*-linux-x86-debugSymbols.tar.gz
 
       - name: Snapshot - prepare
         id: snapshot_prepare
@@ -192,7 +204,7 @@ jobs:
           make dist
           tar xzvf gen/Firebird-*-linux-x64.tar.gz
 
-      - name: Upload
+      - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-alpine-x64
@@ -493,7 +505,7 @@ jobs:
           mkdir gen/artifacts
           mv gen/Release/*.pkg gen/artifacts
 
-      - name: Upload
+      - name: Upload installer
         uses: actions/upload-artifact@main
         with:
           name: firebird-macos
