@@ -250,7 +250,7 @@ jobs:
           if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
           call "%VS_SCRIPT%" -arch=%FB_VS_ARCH%
           cd builds\win32
-          call run_all.bat
+          call run_all.bat PDB
           call run_tests.bat
 
       - name: Upload zip
