@@ -229,10 +229,8 @@ jobs:
           set INNO6_SETUP_PATH=C:\Program Files (x86)\Inno Setup 6
           if "%PLATFORM%" == "x64" set FB_VS_ARCH=amd64
           if "%PLATFORM%" == "x64" set FB_PROCESSOR_ARCHITECTURE=AMD64
-          if "%PLATFORM%" == "x64" set FB_OUTPUT_SUFFIX=x64
           if "%PLATFORM%" == "x86" set FB_VS_ARCH=x86
           if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
-          if "%PLATFORM%" == "x86" set FB_OUTPUT_SUFFIX=win32
           call "%VS_SCRIPT%" -arch=%FB_VS_ARCH%
           cd builds\win32
           call run_all.bat
