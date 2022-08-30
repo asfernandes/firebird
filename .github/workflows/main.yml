@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -37,7 +37,7 @@ jobs:
     container: asfernandes/firebird-builder:x86_64-5
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -172,7 +172,7 @@ jobs:
     container: alpine:3.14
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -208,7 +208,7 @@ jobs:
         platform: [x64, x86]
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -264,7 +264,7 @@ jobs:
         platform: [x64, x86]
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
@@ -354,7 +354,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 10
 
