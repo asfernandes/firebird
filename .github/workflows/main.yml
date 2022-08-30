@@ -241,23 +241,17 @@ jobs:
           call run_all.bat
           call run_tests.bat
 
-      - name: Extract zips
-        shell: cmd
-        run: |
-          7z x builds\install_images\*-windows-${{ matrix.platform }}.zip -ooutput
-          7z x builds\install_images\*-windows-${{ matrix.platform }}-withDebugSymbols.zip -ooutput_debug
-
       - name: Upload zip
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-zip
-          path: output
+          path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}.zip
 
       - name: Upload zip (withDebugSymbols)
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-withDebugSymbols-zip
-          path: output_debug
+          path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}-withDebugSymbols.zip
 
       - name: Upload installer
         uses: actions/upload-artifact@main
@@ -299,23 +293,17 @@ jobs:
           call build.bat
           call run.bat C:\fbscripts\build-%PLATFORM%.bat
 
-      - name: Extract zips
-        shell: cmd
-        run: |
-          7z x builds\install_images\*-${{ steps.build.outputs.arch_suffix }}.zip -ooutput
-          7z x builds\install_images\*-${{ steps.build.outputs.arch_suffix }}-withDebugSymbols.zip -ooutput_debug
-
       - name: Upload zip
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-${{ matrix.platform }}-zip
-          path: output
+          path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}.zip
 
       - name: Upload zip (withDebugSymbols)
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-${{ matrix.platform }}-withDebugSymbols-zip
-          path: output_debug
+          path: builds/install_images/Firebird-*-windows-${{ matrix.platform }}-withDebugSymbols.zip
 
       - name: Upload installer
         uses: actions/upload-artifact@main
