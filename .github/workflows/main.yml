@@ -241,16 +241,11 @@ jobs:
           call run_all.bat
           call run_tests.bat
 
-      - name: Extract zip
-        shell: cmd
-        run: |
-          7z x builds\install_images\*.zip -ooutput
-
       - name: Upload zip
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-vs-${{ env.VS_VERSION }}-${{ matrix.platform }}-zip
-          path: output
+          path: builds/install_images/*.zip
 
       - name: Upload installer
         uses: actions/upload-artifact@main
@@ -286,16 +281,11 @@ jobs:
           call build.bat
           call run.bat C:\fbscripts\build-%PLATFORM%.bat
 
-      - name: Extract zip
-        shell: cmd
-        run: |
-          7z x builds\install_images\*-${{ steps.build.outputs.arch_suffix }}.zip -ooutput
-
       - name: Upload zip
         uses: actions/upload-artifact@main
         with:
           name: firebird-windows-${{ matrix.platform }}-zip
-          path: output
+          path: builds/install_images/*.zip
 
       - name: Upload installer
         uses: actions/upload-artifact@main
