@@ -504,7 +504,7 @@ jobs:
           fail-if-no-release: false
           fail-if-no-assets: false
           assets: |
-            Firebird-*-macos-x64.pkg
+            Firebird-*-macos-x64*.pkg
 
       - name: Snapshot - release
         id: snapshot_release_try1
@@ -518,7 +518,7 @@ jobs:
           prerelease: true
           token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
           files: |
-            gen/artifacts/Firebird-*-macos-x64.pkg
+            gen/artifacts/Firebird-*-macos-x64*.pkg
 
       - name: Snapshot - release (retry)
         uses: softprops/action-gh-release@v1
@@ -532,4 +532,4 @@ jobs:
           prerelease: true
           token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
           files: |
-            gen/artifacts/Firebird-*-macos-x64.pkg
+            gen/artifacts/Firebird-*-macos-x64*.pkg
