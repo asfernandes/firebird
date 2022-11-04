@@ -1,0 +1,59 @@
+name: windows-snapshot
+
+on: push
+
+jobs:
+
+  build-windows:
+    runs-on: self-hosted
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # FIXME:
+        #platform: [x64, x86]
+        platform: [x64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 10
+
+      #- name: Prepare
+      #  shell: cmd
+      #  run: |
+      #    for /r %%i in (*.bat) do unix2dos "%%i"
+
+      - name: Build
+        shell: cmd
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          if "%PLATFORM%" == "x64" set FB_VS_ARCH=amd64
+          if "%PLATFORM%" == "x64" set FB_PROCESSOR_ARCHITECTURE=AMD64
+          if "%PLATFORM%" == "x64" set FB_ARTIFACTS_DIR=output_x64
+          if "%PLATFORM%" == "x86" set FB_VS_ARCH=x86
+          if "%PLATFORM%" == "x86" set FB_PROCESSOR_ARCHITECTURE=x86
+          if "%PLATFORM%" == "x86" set FB_ARTIFACTS_DIR=output_win32
+          echo FB_ARTIFACTS_DIR=%FB_ARTIFACTS_DIR% >> %GITHUB_ENV%
+
+          set FB_SNAP_BIN=C:\Snapshots\bin
+          set PATH=%FB_SNAP_BIN%;%FB_SNAP_BIN%\ssh;%FB_SNAP_BIN%\git\bin;%FB_SNAP_BIN%\7-Zip;%PATH%
+          set PATH=%PATH%;"C:\Program Files\cmake\bin"
+
+          echo Setting MSVC17 environment
+          set DEVENVDIR=
+          set VCINSTALLDIR=
+          set VSINSTALLDIR=
+          call "%VS150COMNTOOLS%\..\..\VC\Auxiliary\Build\vcvarsall.bat" x86_amd64
+          echo VS150COMNTOOLS="%VS150COMNTOOLS%"
+
+          cd builds\win32
+          call run_all.bat JUSTBUILD
+
+      - name: Upload zip
+        uses: actions/upload-artifact@main
+        with:
+          name: firebird-windows-${{ matrix.platform }}-vs-${{ env.VS_VERSION }}
+          path: ${{ env.FB_ARTIFACTS_DIR }}
