@@ -6,6 +6,8 @@
 #include "../common/classes/auto.h"
 #include "../common/classes/RefCounted.h"
 #include "../jrd/lck_proto.h"
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 
 using namespace Firebird;
@@ -16,6 +18,140 @@ BOOST_AUTO_TEST_SUITE(LockSuite)
 
 
 BOOST_AUTO_TEST_SUITE(LockTests)
+
+BOOST_AUTO_TEST_CASE(DeadLockTest)
+{
+	struct Workload
+	{
+		StatusHolder localStatus;
+		CheckStatusWrapper statusWrapper{&localStatus};
+		RefPtr<JAttachment> attachment;
+		AutoPtr<Lock> lock;
+		unsigned threadNum;
+		unsigned level;
+	};
+
+	const auto blockingAst = [](void* astObject) -> int
+	{
+		auto workload = (Workload*) astObject;
+
+		try
+		{
+			const auto dbb = workload->lock->lck_dbb;
+			AsyncContextHolder tdbb(dbb, FB_FUNCTION, workload->lock);
+
+			printf("thread %u (%u) - level %u - before LCK_release\n", workload->threadNum, (unsigned) gettid(), workload->level);
+			LCK_release(tdbb, workload->lock);
+			printf("thread %u (%u) - level %u - after LCK_release\n", workload->threadNum, (unsigned) gettid(), workload->level);
+		}
+		catch (const Exception&)
+		{
+			printf("thread %u (%u) - level %u - AST exception\n", workload->threadNum, (unsigned) gettid(), workload->level);
+		}
+
+		return 0;
+	};
+
+	const auto filename = "/tmp/test1.fdb";
+
+	LocalStatus initLocalStatus;
+	CheckStatusWrapper initStatusWrapper(&initLocalStatus);
+
+	AutoPlugin<JProvider> provider(JProvider::getInstance());
+
+	auto initAttachment = makeNoIncRef(provider->createDatabase(&initStatusWrapper, filename, 0, nullptr));
+	initLocalStatus.check();
+
+	std::vector<Workload*> workloads;
+	std::vector<std::thread> threads;
+
+	std::mutex initMtx;
+	std::condition_variable initCondVar;
+	unsigned initCount = 0;
+
+	constexpr unsigned THREAD_COUNT = 4;
+
+	for (unsigned threadNum = 0; threadNum < THREAD_COUNT; ++threadNum)
+	{
+		const auto workload = new Workload();
+		workload->attachment = makeNoIncRef(provider->attachDatabase(&workload->statusWrapper, filename, 0, nullptr));
+		workload->localStatus.check();
+		workload->threadNum = threadNum;
+		workload->level = threadNum == 2 ? LCK_SR : LCK_EX;
+		workloads.push_back(workload);
+
+		threads.push_back(std::thread([&, workload]() {
+			{	// scope
+				EngineContextHolder tdbb(&workload->statusWrapper, workload->attachment.getPtr(), FB_FUNCTION);
+
+				{	// scope
+					std::unique_lock initMtxGuard(initMtx);
+					++initCount;
+
+					printf("thread %u (%u) - level %u - before wait\n", workload->threadNum, (unsigned) gettid(), workload->level);
+					initCondVar.wait(initMtxGuard, [&] { return initCount == THREAD_COUNT; });
+					printf("thread %u (%u) - level %u - after wait\n", workload->threadNum, (unsigned) gettid(), workload->level);
+				}
+
+				initCondVar.notify_all();
+
+				workload->lock.reset(FB_NEW_RPT(workload->attachment->getPool(), 0) Lock(tdbb, 0,
+					LCK_test_attachment, workload, blockingAst));
+
+				if (workload->lock->lck_logical == LCK_none)
+				{
+					printf("thread %u (%u) - level %u - before LCK_lock\n", workload->threadNum, (unsigned) gettid(), workload->level);
+					LCK_lock(tdbb, workload->lock, workload->level, LCK_WAIT);
+					printf("thread %u (%u) - level %u - after LCK_lock\n", workload->threadNum, (unsigned) gettid(), workload->level);
+				}
+				else
+				{
+					printf("thread %u (%u) - level %u - was locked\n", workload->threadNum, (unsigned) gettid(), workload->level);
+				}
+			}
+
+			printf("thread %u (%u) - level %u - checked out\n", workload->threadNum, (unsigned) gettid(), workload->level);
+		}));
+	}
+
+	{	// scope
+		unsigned workloadNum = 0;
+
+		for (auto& thread : threads)
+		{
+			auto workload = workloads[workloadNum];
+			printf("thread %u (%u) - level %u - joinning\n", workload->threadNum, (unsigned) gettid(), workload->level);
+			thread.join();
+
+			++workloadNum;
+		}
+	}
+
+	for (auto workload : workloads)
+	{
+		printf("thread %u (%u) - level %u - detach\n", workload->threadNum, (unsigned) gettid(), workload->level);
+
+		{	// scope
+			EngineContextHolder tdbb(&workload->statusWrapper, workload->attachment.getPtr(), FB_FUNCTION);
+
+			if (workload->lock->lck_logical != LCK_none)
+				LCK_release(tdbb, workload->lock);
+		}
+
+		workload->attachment->detach(&workload->statusWrapper);
+		workload->localStatus.check();
+
+		delete workload;
+	}
+
+	initAttachment->dropDatabase(&initStatusWrapper);
+	initLocalStatus.check();
+
+	initAttachment = nullptr;
+
+	provider->shutdown(&initStatusWrapper, 0, fb_shutrsn_app_stopped);
+	initLocalStatus.check();
+}
 
 BOOST_AUTO_TEST_CASE(LockTest)
 {
