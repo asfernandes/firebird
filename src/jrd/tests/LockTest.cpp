@@ -48,7 +48,7 @@ BOOST_AUTO_TEST_CASE(LockTest)
 	LocalStatus initLocalStatus;
 	CheckStatusWrapper initStatusWrapper(&initLocalStatus);
 
-	RefPtr<JProvider> provider(FB_NEW JProvider(nullptr));
+	AutoPlugin<JProvider> provider(JProvider::getInstance());
 
 	auto initAttachment = makeNoIncRef(provider->createDatabase(&initStatusWrapper, filename, 0, nullptr));
 	initLocalStatus.check();
@@ -115,7 +115,7 @@ BOOST_AUTO_TEST_CASE(LockTest)
 	for (auto& thread : threads)
 		thread.join();
 
-	BOOST_CHECK(counter == THREAD_COUNT * ITER_COUNT);
+	BOOST_TEST(counter == THREAD_COUNT * ITER_COUNT);
 
 	initAttachment->dropDatabase(&initStatusWrapper);
 	initLocalStatus.check();
