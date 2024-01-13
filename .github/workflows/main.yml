@@ -269,7 +269,7 @@ jobs:
             builds/install_images/Firebird-*-windows-${{ matrix.platform }}*.exe
             builds/install_images/Firebird-*-windows-${{ matrix.platform }}*.zip
 
-  build-macos:
+  build-macos-x64:
     runs-on: macos-12
 
     steps:
@@ -319,7 +319,7 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@main
         with:
-          name: firebird-macos
+          name: firebird-macos-x64
           path: gen/artifacts
 
       - name: Create release
@@ -328,6 +328,66 @@ jobs:
           token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
           deletePatterns: Firebird-*-macos-x64*.pkg
           uploadFiles: gen/artifacts/Firebird-*-macos-x64*.pkg
+
+  build-macos-arm64:
+    runs-on: flyci-macos-large-latest-m1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 10
+          submodules: 'true'
+
+      - name: Prepare - Install tools
+        run: |
+          brew install automake autoconf-archive cmake libtool ninja
+
+      - name: Cache - vcpkg
+        uses: actions/cache@v3
+        with:
+          key: ${{ runner.os }}-vcpkg
+          path: |
+            $HOME/.cache/vcpkg/archives
+
+      - name: Build
+        run: |
+          export LIBTOOLIZE=glibtoolize
+          export LIBTOOL=glibtool
+
+          ./autogen.sh --with-builtin-tommath --with-builtin-tomcrypt
+          make -j4
+          make tests -j4
+          make run_tests
+
+          make -C gen -B -f make.platform.postfix
+          make -C gen -B -f Makefile.install
+
+          # Rename directory to make sure the build is relocatable.
+          mv gen gen2
+          sudo installer -pkg gen2/Release/*.pkg -verbose -target /
+
+          export FIREBIRD_LOCK=`pwd`/temp
+          echo "create database 't.fdb'; select '1' from rdb\$database; select _win1252 '2' from rdb\$database; select _utf8 '3' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
+
+          echo "create database 'localhost:/tmp/t.fdb' user sysdba password 'masterkey'; select '11' from rdb\$database; select _win1252 '22' from rdb\$database; select _utf8 '33' collate unicode from rdb\$database;" | /Library/Frameworks/Firebird.framework/Resources/bin/isql
+
+          mv gen2 gen
+          mkdir gen/artifacts
+          mv gen/Release/*.pkg gen/artifacts
+
+      - name: Upload installer
+        uses: actions/upload-artifact@main
+        with:
+          name: firebird-macos-arm64
+          path: gen/artifacts
+
+      - name: Create release
+        uses: ./.github/actions/create-release
+        with:
+          token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
+          deletePatterns: Firebird-*-macos-arm64*.pkg
+          uploadFiles: gen/artifacts/Firebird-*-macos-arm64*.pkg
 
   build-android-initial:
     name: build-android-${{ matrix.arch }}-initial
