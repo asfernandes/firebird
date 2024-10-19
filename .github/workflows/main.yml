@@ -324,8 +324,9 @@ jobs:
       - name: Cache - vcpkg
         uses: actions/cache@v4
         with:
-          key: ${{ runner.os }}-vcpkg-0
+          key: vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('vcpkg-configuration.json', 'vcpkg.json', 'vcpkg-custom/**') }}
           path: |
+            $XDG_CACHE_HOME/vcpkg/archives
             $HOME/.cache/vcpkg/archives
 
       - name: Build
