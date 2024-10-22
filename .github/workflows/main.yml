@@ -46,9 +46,6 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-
       - name: Build
         run: |
           export LIBTOOLIZE=glibtoolize
@@ -76,15 +73,6 @@ jobs:
           mkdir gen/artifacts
           mv gen/Release/*.pkg gen/artifacts
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: firebird-macos-${{ matrix.arch }}
-          path: gen/artifacts
-
-      - name: Create release
-        uses: ./.github/actions/create-release
-        with:
-          token: ${{ secrets.SNAPSHOT_RELEASE_TOKEN }}
-          deletePatterns: Firebird-*-macos-${{ matrix.arch }}*.pkg
-          uploadFiles: gen/artifacts/Firebird-*-macos-${{ matrix.arch }}*.pkg
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: true
