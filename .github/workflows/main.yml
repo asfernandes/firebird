@@ -321,6 +321,10 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # FIXME:
+      - name: Debug
+        uses: fawazahmed0/action-debug@main
+
       - name: Build
         run: |
           export LIBTOOLIZE=glibtoolize
