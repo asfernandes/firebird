@@ -35,6 +35,9 @@
 #include "../jrd/tra_proto.h"
 
 #include <atomic>
+#include <mutex>
+#include <vector>
+#include "boost/interprocess/sync/interprocess_mutex.hpp"
 
 #ifdef WIN_NT
 #include <process.h>
@@ -100,11 +103,13 @@ namespace
 			event_t clientEvent;
 			USHORT bufferSize;
 			std::atomic<Tag> tag;
+			unsigned seq;
+			boost::interprocess::interprocess_mutex bufferMutex;
 			char userName[USERNAME_LENGTH + 1];	// \0 if has PROFILE_ANY_ATTACHMENT
 			alignas(FB_ALIGNMENT) UCHAR buffer[4096];
 		};
 
-		static const USHORT VERSION = 2;
+		static const USHORT VERSION = 3;
 
 	public:
 		ProfilerIpc(thread_db* tdbb, MemoryPool& pool, AttNumber aAttachmentId, bool server = false);
@@ -179,7 +184,7 @@ private:
 		listener->watcherThread();
 	}
 
-	void processCommand(thread_db* tdbb);
+	void processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std::vector<UCHAR>& buffer);
 
 private:
 	Attachment* const attachment;
@@ -736,6 +741,8 @@ ProfilerIpc::ProfilerIpc(thread_db* tdbb, MemoryPool& pool, AttNumber aAttachmen
 	{
 		Guard guard(this);
 
+		header->seq = 0;
+
 		if (sharedMemory->eventInit(&header->serverEvent) != FB_SUCCESS)
 			(Arg::Gds(isc_random) << "ProfilerIpc eventInit(serverEvent) failed").raise();
 	}
@@ -817,18 +824,17 @@ void ProfilerIpc::internalSendAndReceive(thread_db* tdbb, Tag tag,
 		}
 	});
 
-	const SLONG value = sharedMemory->eventClear(&header->clientEvent);
+	const SLONG clientEventCounter = sharedMemory->eventClear(&header->clientEvent);
 
-	const Tag oldTag = header->tag.exchange(tag);
-	switch (oldTag)
+	std::unique_lock bufferMutexLock(header->bufferMutex);
+
+	switch (header->tag)
 	{
 	case Tag::NOP:
-		header->tag = oldTag;
 		(Arg::Gds(isc_random) << "Remote attachment failed to start listener thread").raise();
 		break;
 
 	case Tag::SERVER_EXITED:
-		header->tag = oldTag;
 		(Arg::Gds(isc_random) << "Cannot start remote profile session - attachment exited").raise();
 		break;
 
@@ -846,40 +852,48 @@ void ProfilerIpc::internalSendAndReceive(thread_db* tdbb, Tag tag,
 	fb_assert(inSize <= sizeof(header->buffer));
 	memcpy(header->buffer, in, inSize);
 
+	header->tag = tag;
+	const auto seq = ++header->seq;
+
+	bufferMutexLock.unlock();
+
 	if (sharedMemory->eventPost(&header->serverEvent) != FB_SUCCESS)
 		(Arg::Gds(isc_random) << "Cannot start remote profile session - attachment exited").raise();
 
+	const SLONG TIMEOUT = 500 * 1000;		// 0.5 sec
+	const int serverPID = header->serverEvent.event_pid;
+
+	while (true)
 	{
-		const SLONG TIMEOUT = 500 * 1000;		// 0.5 sec
+		{	// scope
+			EngineCheckout cout(tdbb, FB_FUNCTION);
 
-		const int serverPID = header->serverEvent.event_pid;
-		while (true)
-		{
+			if (sharedMemory->eventWait(&header->clientEvent, clientEventCounter, TIMEOUT) == FB_SUCCESS)
+				break;
+
+			if (serverPID != getpid() && !ISC_check_process_existence(serverPID))
 			{
-				EngineCheckout cout(tdbb, FB_FUNCTION);
-				if (sharedMemory->eventWait(&header->clientEvent, value, TIMEOUT) == FB_SUCCESS)
-					break;
+				// Server process was died or exited
+				fb_assert((header->tag == tag) || header->tag == Tag::SERVER_EXITED);
 
-				if (serverPID != getpid() && !ISC_check_process_existence(serverPID))
+				if (header->tag == tag)
 				{
-					// Server process was died or exited
-					fb_assert((header->tag == tag) || header->tag == Tag::SERVER_EXITED);
-
-					if (header->tag == tag)
+					header->tag = Tag::SERVER_EXITED;
+					if (header->serverEvent.event_pid)
 					{
-						header->tag = Tag::SERVER_EXITED;
-						if (header->serverEvent.event_pid)
-						{
-							sharedMemory->eventFini(&header->serverEvent);
-							header->serverEvent.event_pid = 0;
-						}
+						sharedMemory->eventFini(&header->serverEvent);
+						header->serverEvent.event_pid = 0;
 					}
-					break;
 				}
+
+				break;
 			}
-			JRD_reschedule(tdbb, true);
 		}
+
+		JRD_reschedule(tdbb, true);
 	}
+
+	bufferMutexLock.lock();
 
 	switch (header->tag)
 	{
@@ -977,7 +991,7 @@ void ProfilerListener::watcherThread()
 	{
 		while (!exiting)
 		{
-			const SLONG value = sharedMemory->eventClear(&header->serverEvent);
+			const SLONG serverEventCounter = sharedMemory->eventClear(&header->serverEvent);
 
 			if (startup)
 			{
@@ -986,6 +1000,10 @@ void ProfilerListener::watcherThread()
 			}
 			else
 			{
+				ProfilerIpc::Tag tag;
+				unsigned seq;
+				std::vector<UCHAR> buffer;
+
 				fb_assert(header->tag >= ProfilerIpc::Tag::FIRST_CLIENT_OP);
 
 				try
@@ -993,11 +1011,28 @@ void ProfilerListener::watcherThread()
 					FbLocalStatus statusVector;
 					EngineContextHolder tdbb(&statusVector, attachment->getInterface(), FB_FUNCTION);
 
-					processCommand(tdbb);
-					header->tag = ProfilerIpc::Tag::RESPONSE;
+					{	// scope
+						std::unique_lock bufferMutexLock(header->bufferMutex);
+
+						if (header->userName[0] && attachment->getUserName() != header->userName)
+							status_exception::raise(Arg::Gds(isc_miss_prvlg) << "PROFILE_ANY_ATTACHMENT");
+
+						fb_assert(header->tag >= ProfilerIpc::Tag::FIRST_CLIENT_OP);
+
+						tag = header->tag;
+						seq = header->seq;
+						buffer.resize(header->bufferSize);
+						memcpy(buffer.data(), header->buffer, header->bufferSize);
+					}
+
+					processCommand(tdbb, tag, buffer);
+
+					tag = ProfilerIpc::Tag::RESPONSE;
 				}
 				catch (const status_exception& e)
 				{
+					tag = ProfilerIpc::Tag::EXCEPTION;
+
 					//// TODO: Serialize status vector instead of formated message.
 
 					const ISC_STATUS* status = e.value();
@@ -1012,20 +1047,34 @@ void ProfilerListener::watcherThread()
 						errorMsg += temp;
 					}
 
-					header->bufferSize = MIN(errorMsg.length(), sizeof(header->buffer) - 1);
-					strncpy((char*) header->buffer, errorMsg.c_str(), sizeof(header->buffer));
-					header->buffer[header->bufferSize] = '\0';
-
-					header->tag = ProfilerIpc::Tag::EXCEPTION;
+					header->bufferSize = MIN(errorMsg.length(), sizeof(header->buffer));
+					memcpy(header->buffer, errorMsg.c_str(), header->bufferSize);
 				}
 
-				sharedMemory->eventPost(&header->clientEvent);
+				fb_assert(buffer.size() <= sizeof(header->buffer));
+
+				{	// scope
+					std::unique_lock bufferMutexLock(header->bufferMutex, std::try_to_lock);
+
+					// Otherwise a client lost interest in the response.
+					if (bufferMutexLock.owns_lock() && header->seq == seq)
+					{
+						if (header->seq == seq)
+						{
+							header->tag = tag;
+							header->bufferSize = buffer.size();
+							memcpy(header->buffer, buffer.data(), buffer.size());
+
+							sharedMemory->eventPost(&header->clientEvent);
+						}
+					}
+				}
 			}
 
 			if (exiting)
 				break;
 
-			sharedMemory->eventWait(&header->serverEvent, value, 0);
+			sharedMemory->eventWait(&header->serverEvent, serverEventCounter, 0);
 		}
 	}
 	catch (const Exception& ex)
@@ -1033,11 +1082,16 @@ void ProfilerListener::watcherThread()
 		iscLogException("Error in profiler watcher thread\n", ex);
 	}
 
-	const ProfilerIpc::Tag oldTag = header->tag.exchange(ProfilerIpc::Tag::SERVER_EXITED);
-	if (oldTag >= ProfilerIpc::Tag::FIRST_CLIENT_OP)
-	{
-		fb_assert(header->clientEvent.event_pid);
-		sharedMemory->eventPost(&header->clientEvent);
+	{	// scope
+		std::unique_lock bufferMutexLock(header->bufferMutex);
+
+		if (header->tag >= ProfilerIpc::Tag::FIRST_CLIENT_OP)
+		{
+			fb_assert(header->clientEvent.event_pid);
+			sharedMemory->eventPost(&header->clientEvent);
+		}
+
+		header->tag = ProfilerIpc::Tag::SERVER_EXITED;
 	}
 
 	try
@@ -1051,70 +1105,75 @@ void ProfilerListener::watcherThread()
 	}
 }
 
-void ProfilerListener::processCommand(thread_db* tdbb)
+void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std::vector<UCHAR>& buffer)
 {
-	const auto header = ipc->sharedMemory->getHeader();
 	const auto profilerManager = attachment->getProfilerManager(tdbb);
-
-	if (header->userName[0] && attachment->getUserName() != header->userName)
-		status_exception::raise(Arg::Gds(isc_miss_prvlg) << "PROFILE_ANY_ATTACHMENT");
 
 	using Tag = ProfilerIpc::Tag;
 
-	switch (header->tag)
+	switch (tag)
 	{
 		case Tag::CANCEL_SESSION:
+			fb_assert(buffer.empty());
 			profilerManager->cancelSession();
-			header->bufferSize = 0;
+			buffer.resize(0);
 			break;
 
 		case Tag::DISCARD:
+			fb_assert(buffer.empty());
 			profilerManager->discard();
-			header->bufferSize = 0;
+			buffer.resize(0);
 			break;
 
 		case Tag::FINISH_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::FinishSessionInput::Type*>(header->buffer);
-			fb_assert(sizeof(*in) == header->bufferSize);
+			const auto in = reinterpret_cast<const ProfilerPackage::FinishSessionInput::Type*>(buffer.data());
+			fb_assert(sizeof(*in) == buffer.size());
+
 			profilerManager->finishSession(tdbb, in->flush);
-			header->bufferSize = 0;
+
+			buffer.resize(0);
 			break;
 		}
 
 		case Tag::FLUSH:
+			fb_assert(buffer.empty());
 			profilerManager->flush();
-			header->bufferSize = 0;
+			buffer.resize(0);
 			break;
 
 		case Tag::PAUSE_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::PauseSessionInput::Type*>(header->buffer);
-			fb_assert(sizeof(*in) == header->bufferSize);
+			const auto in = reinterpret_cast<const ProfilerPackage::PauseSessionInput::Type*>(buffer.data());
+			fb_assert(sizeof(*in) == buffer.size());
+
 			profilerManager->pauseSession(in->flush);
-			header->bufferSize = 0;
+
+			buffer.resize(0);
 			break;
 		}
 
 		case Tag::RESUME_SESSION:
+			fb_assert(buffer.empty());
 			profilerManager->resumeSession();
-			header->bufferSize = 0;
+			buffer.resize(0);
 			break;
 
 		case Tag::SET_FLUSH_INTERVAL:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::SetFlushIntervalInput::Type*>(header->buffer);
-			fb_assert(sizeof(*in) == header->bufferSize);
+			const auto in = reinterpret_cast<const ProfilerPackage::SetFlushIntervalInput::Type*>(buffer.data());
+			fb_assert(sizeof(*in) == buffer.size());
 
 			profilerManager->setFlushInterval(in->flushInterval);
-			header->bufferSize = 0;
+
+			buffer.resize(0);
 			break;
 		}
 
 		case Tag::START_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::StartSessionInput::Type*>(header->buffer);
-			fb_assert(sizeof(*in) == header->bufferSize);
+			const auto in = reinterpret_cast<const ProfilerPackage::StartSessionInput::Type*>(buffer.data());
+			fb_assert(sizeof(*in) == buffer.size());
 
 			const string description(in->description.str,
 				in->descriptionNull ? 0 : in->description.length);
@@ -1125,14 +1184,12 @@ void ProfilerListener::processCommand(thread_db* tdbb)
 			const string pluginOptions(in->pluginOptions.str,
 				in->pluginOptionsNull ? 0 : in->pluginOptions.length);
 
-			const auto out = reinterpret_cast<ProfilerPackage::StartSessionOutput::Type*>(header->buffer);
-			static_assert(sizeof(*out) <= sizeof(header->buffer), "Buffer size too small");
-			header->bufferSize = sizeof(*out);
+			const auto out = reinterpret_cast<ProfilerPackage::StartSessionOutput::Type*>(buffer.data());
+			buffer.resize(sizeof(*out));
 
 			out->sessionIdNull = FB_FALSE;
 			out->sessionId = profilerManager->startSession(tdbb, flushInterval,
 				pluginName, description, pluginOptions);
-
 			break;
 		}
 
