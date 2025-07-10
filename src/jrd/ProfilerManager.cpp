@@ -33,11 +33,11 @@
 #include "../jrd/met_proto.h"
 #include "../jrd/pag_proto.h"
 #include "../jrd/tra_proto.h"
+#include "../common/classes/Spinlock.h"
 
 #include <atomic>
 #include <mutex>
 #include <vector>
-#include "boost/interprocess/sync/interprocess_mutex.hpp"
 
 #ifdef WIN_NT
 #include <process.h>
@@ -103,8 +103,8 @@ namespace
 			event_t clientEvent;
 			USHORT bufferSize;
 			std::atomic<Tag> tag;
-			unsigned seq;
-			boost::interprocess::interprocess_mutex bufferMutex;
+			std::atomic_uint seq;
+			SpinLock bufferMutex;
 			char userName[USERNAME_LENGTH + 1];	// \0 if has PROFILE_ANY_ATTACHMENT
 			alignas(FB_ALIGNMENT) UCHAR buffer[4096];
 		};
