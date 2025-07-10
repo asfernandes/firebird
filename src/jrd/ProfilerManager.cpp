@@ -37,7 +37,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <vector>
 
 #ifdef WIN_NT
 #include <process.h>
@@ -184,7 +183,7 @@ private:
 		listener->watcherThread();
 	}
 
-	void processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std::vector<UCHAR>& buffer);
+	void processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, UCharBuffer& buffer);
 
 private:
 	Attachment* const attachment;
@@ -1002,7 +1001,7 @@ void ProfilerListener::watcherThread()
 			{
 				ProfilerIpc::Tag tag;
 				unsigned seq;
-				std::vector<UCHAR> buffer;
+				UCharBuffer buffer;
 
 				fb_assert(header->tag >= ProfilerIpc::Tag::FIRST_CLIENT_OP);
 
@@ -1021,8 +1020,7 @@ void ProfilerListener::watcherThread()
 
 						tag = header->tag;
 						seq = header->seq;
-						buffer.resize(header->bufferSize);
-						memcpy(buffer.data(), header->buffer, header->bufferSize);
+						memcpy(buffer.getBuffer(header->bufferSize, false), header->buffer, header->bufferSize);
 					}
 
 					processCommand(tdbb, tag, buffer);
@@ -1051,7 +1049,7 @@ void ProfilerListener::watcherThread()
 					memcpy(header->buffer, errorMsg.c_str(), header->bufferSize);
 				}
 
-				fb_assert(buffer.size() <= sizeof(header->buffer));
+				fb_assert(buffer.getCount() <= sizeof(header->buffer));
 
 				{	// scope
 					std::unique_lock bufferMutexLock(header->bufferMutex, std::try_to_lock);
@@ -1062,8 +1060,8 @@ void ProfilerListener::watcherThread()
 						if (header->seq == seq)
 						{
 							header->tag = tag;
-							header->bufferSize = buffer.size();
-							memcpy(header->buffer, buffer.data(), buffer.size());
+							header->bufferSize = buffer.getCount();
+							memcpy(header->buffer, buffer.begin(), buffer.getCount());
 
 							sharedMemory->eventPost(&header->clientEvent);
 						}
@@ -1105,7 +1103,7 @@ void ProfilerListener::watcherThread()
 	}
 }
 
-void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std::vector<UCHAR>& buffer)
+void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, UCharBuffer& buffer)
 {
 	const auto profilerManager = attachment->getProfilerManager(tdbb);
 
@@ -1114,21 +1112,21 @@ void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std
 	switch (tag)
 	{
 		case Tag::CANCEL_SESSION:
-			fb_assert(buffer.empty());
+			fb_assert(buffer.isEmpty());
 			profilerManager->cancelSession();
 			buffer.resize(0);
 			break;
 
 		case Tag::DISCARD:
-			fb_assert(buffer.empty());
+			fb_assert(buffer.isEmpty());
 			profilerManager->discard();
 			buffer.resize(0);
 			break;
 
 		case Tag::FINISH_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::FinishSessionInput::Type*>(buffer.data());
-			fb_assert(sizeof(*in) == buffer.size());
+			const auto in = reinterpret_cast<const ProfilerPackage::FinishSessionInput::Type*>(buffer.begin());
+			fb_assert(sizeof(*in) == buffer.getCount());
 
 			profilerManager->finishSession(tdbb, in->flush);
 
@@ -1137,15 +1135,15 @@ void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std
 		}
 
 		case Tag::FLUSH:
-			fb_assert(buffer.empty());
+			fb_assert(buffer.isEmpty());
 			profilerManager->flush();
 			buffer.resize(0);
 			break;
 
 		case Tag::PAUSE_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::PauseSessionInput::Type*>(buffer.data());
-			fb_assert(sizeof(*in) == buffer.size());
+			const auto in = reinterpret_cast<const ProfilerPackage::PauseSessionInput::Type*>(buffer.begin());
+			fb_assert(sizeof(*in) == buffer.getCount());
 
 			profilerManager->pauseSession(in->flush);
 
@@ -1154,15 +1152,15 @@ void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std
 		}
 
 		case Tag::RESUME_SESSION:
-			fb_assert(buffer.empty());
+			fb_assert(buffer.isEmpty());
 			profilerManager->resumeSession();
 			buffer.resize(0);
 			break;
 
 		case Tag::SET_FLUSH_INTERVAL:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::SetFlushIntervalInput::Type*>(buffer.data());
-			fb_assert(sizeof(*in) == buffer.size());
+			const auto in = reinterpret_cast<const ProfilerPackage::SetFlushIntervalInput::Type*>(buffer.begin());
+			fb_assert(sizeof(*in) == buffer.getCount());
 
 			profilerManager->setFlushInterval(in->flushInterval);
 
@@ -1172,8 +1170,8 @@ void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std
 
 		case Tag::START_SESSION:
 		{
-			const auto in = reinterpret_cast<const ProfilerPackage::StartSessionInput::Type*>(buffer.data());
-			fb_assert(sizeof(*in) == buffer.size());
+			const auto in = reinterpret_cast<const ProfilerPackage::StartSessionInput::Type*>(buffer.begin());
+			fb_assert(sizeof(*in) == buffer.getCount());
 
 			const string description(in->description.str,
 				in->descriptionNull ? 0 : in->description.length);
@@ -1184,7 +1182,7 @@ void ProfilerListener::processCommand(thread_db* tdbb, ProfilerIpc::Tag tag, std
 			const string pluginOptions(in->pluginOptions.str,
 				in->pluginOptionsNull ? 0 : in->pluginOptions.length);
 
-			const auto out = reinterpret_cast<ProfilerPackage::StartSessionOutput::Type*>(buffer.data());
+			const auto out = reinterpret_cast<ProfilerPackage::StartSessionOutput::Type*>(buffer.begin());
 			buffer.resize(sizeof(*out));
 
 			out->sessionIdNull = FB_FALSE;
