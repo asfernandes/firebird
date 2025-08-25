@@ -347,6 +347,7 @@ inline std::optional<Message> IpcMessageReceiver<Message>::receive(std::function
 	}
 
 	ipc.receiverSignal->reset();
+	header->receiverFlag.store(0, std::memory_order_release);
 
 	std::optional<Message> messageOpt;
 
@@ -375,11 +376,8 @@ inline std::optional<Message> IpcMessageReceiver<Message>::receive(std::function
 		memcpy(span.data(), header->messageBuffer, span.size());
 	}
 
-	header->receiverFlag.store(0, std::memory_order_release);
-
-	ipc.senderSignal->signal();
-
 	header->senderFlag.store(1, std::memory_order_release);
+	ipc.senderSignal->signal();
 
 	return messageOpt;
 }
@@ -459,7 +457,6 @@ inline bool IpcMessageSender<Message>::send(const Message& message, std::functio
 	}
 
 	header->receiverFlag.store(1, std::memory_order_release);
-
 	ipc.receiverSignal->signal();
 
 	while (header->senderFlag.load(std::memory_order_acquire) == 0)
@@ -475,7 +472,6 @@ inline bool IpcMessageSender<Message>::send(const Message& message, std::functio
 	}
 
 	ipc.senderSignal->reset();
-
 	header->senderFlag.store(0, std::memory_order_release);
 
 	return true;
