@@ -116,6 +116,7 @@ public:
 	{
 		int32_t ownerPid;
 		int32_t ownerId;
+		std::atomic_uint8_t alive;
 #ifdef IPC_MESSAGE_USE_SHARED_SIGNAL
 		IpcSharedSignal receiverSignal;
 		IpcSharedSignal senderSignal;
@@ -140,6 +141,7 @@ public:
 		{
 			header->ownerPid = (int) getpid();
 			header->ownerId = ++IPC_MESSAGE_COUNTER;
+			header->alive = 1;
 
 #ifdef IPC_MESSAGE_USE_SHARED_SIGNAL
 			new (&header->receiverSignal) IpcSharedSignal();
@@ -320,6 +322,9 @@ inline void IpcMessageReceiver<Message>::disconnect()
 	{
 		disconnected = true;
 		std::lock_guard mutexLock(mutex);
+
+		const auto header = ipc.sharedMemory.getHeader();
+		header->alive = 0;
 	}
 }
 
@@ -428,6 +433,9 @@ inline bool IpcMessageSender<Message>::send(const Message& message, std::functio
 
 	while (!guard.tryLock(IPC_MESSAGE_TIMEOUT))
 	{
+		if (!header->alive.load(std::memory_order_relaxed))
+			disconnected = true;
+
 		if (disconnected)
 			return false;
 
@@ -463,6 +471,9 @@ inline bool IpcMessageSender<Message>::send(const Message& message, std::functio
 	{
 		if (!ipc.senderSignal->wait(IPC_MESSAGE_TIMEOUT))
 		{
+			if (!header->alive.load(std::memory_order_relaxed))
+				disconnected = true;
+
 			if (disconnected)
 				return false;
 
