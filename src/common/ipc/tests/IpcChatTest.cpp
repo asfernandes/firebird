@@ -1,4 +1,3 @@
-#if 0	// FIXME:
 /*
  *  The contents of this file are subject to the Initial
  *  Developer's Public License Version 1.0 (the "License");
@@ -123,4 +122,3 @@ BOOST_AUTO_TEST_CASE(IpcChatTest)
 
 BOOST_AUTO_TEST_SUITE_END()	// IpcChatSuite
 BOOST_AUTO_TEST_SUITE_END()	// CommonSuite
-#endif
