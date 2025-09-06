@@ -132,6 +132,7 @@ ModuleLoader::Module* ModuleLoader::loadModule(ISC_STATUS* status, const Firebir
 	void* module = dlopen(modPath.nullStr(), FB_RTLD_MODE);
 	if (module == NULL)
 	{
+		printf("--> %s, %s\n", modPath.c_str(), dlerror());
 		makeErrorStatus(status, dlerror());
 		return 0;
 	}

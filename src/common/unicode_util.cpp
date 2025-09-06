@@ -120,7 +120,10 @@ public:
 		}
 
 		if (!optional)
+		{
+			printf("--> symbol: %s\n", name);
 			(Arg::Gds(isc_icu_entrypoint) << name).raise();
+		}
 
 		return "";
 	}
