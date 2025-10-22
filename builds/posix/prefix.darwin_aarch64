@@ -44,8 +44,8 @@ CXXFLAGS:=$(CXXFLAGS) -fvisibility-inlines-hidden -fvisibility=hidden
 
 UNDEF_PLATFORM=
 
-LINK_LIBS+=-liconv
+#LINK_LIBS+=-liconv
 #MATHLIB=$(ROOT)/extern/libtommath/.libs/libtommath.a
-SO_LINK_LIBS+=-liconv
+#SO_LINK_LIBS+=-liconv
 
 include $(ROOT)/gen/darwin.defaults
