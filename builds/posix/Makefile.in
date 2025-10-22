@@ -76,9 +76,7 @@ endif
 
 ifeq ($(TOMMATH_BUILD_FLG),Y)
 TOM2TOM_CFLAGS=-I../libtommath
-ifeq ($(PLATFORM),DARWIN)
-LTC_LDFLAGS='-L$(LIB) $(call LINK_DARWIN_RPATH,..)'
-else
+ifneq ($(PLATFORM),DARWIN)
 LTC_LDFLAGS='-L$(LIB) $(subst $,$$$$,$(call LIB_LINK_RPATH,lib))'
 endif
 endif
