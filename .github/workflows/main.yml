@@ -534,16 +534,16 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-v7
+          key: avd-v8
 
       - name: Create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.35.0
         with:
           avd-name: firebird-builder
           arch: x86_64
           api-level: 30
-          target: google_apis
+          target: google_apis_ps16k
           ndk: 28.2.13676358
           emulator-options: -no-window -noaudio -no-boot-anim -camera-back none -port 5554
           emulator-boot-timeout: 900
@@ -551,12 +551,12 @@ jobs:
             echo "Generated AVD snapshot for caching."
 
       - name: Create necessary files in Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.35.0
         with:
           avd-name: firebird-builder
           arch: x86_64
           api-level: 30
-          target: google_apis
+          target: google_apis_ps16k
           ndk: 28.2.13676358
           emulator-options: -no-snapshot-save -no-window -noaudio -no-boot-anim -camera-back none -port 5554
           emulator-boot-timeout: 900
