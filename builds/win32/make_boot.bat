@@ -205,7 +205,16 @@ goto :EOF
 :interfaces
 @echo.
 @echo Building CLOOP and generating interfaces...
-@nmake /s /x interfaces_%FB_TARGET_PLATFORM%.log /f gen_helper.nmake updateCloopInterfaces
+@mkdir %FB_GEN_DIR%\%FB_TARGET_PLATFORM%\cloop 2>nul
+@pushd %FB_GEN_DIR%\%FB_TARGET_PLATFORM%\cloop
+@cmake -G "%MSVC_CMAKE_GENERATOR%" -A %FB_TARGET_PLATFORM% -S %FB_ROOT_PATH%\extern\cloop -DCLOOP_BUILD_TESTS=OFF
+if errorlevel 1 call :boot2 interfaces
+REM FIXME: @cmake --build %FB_GEN_DIR%\%FB_TARGET_PLATFORM%\cloop --target ALL_BUILD --config %FB_CONFIG% > cloop_%FB_CONFIG%_%FB_TARGET_PLATFORM%.log
+@cmake --build %FB_GEN_DIR%\%FB_TARGET_PLATFORM%\cloop --target ALL_BUILD --config %FB_CONFIG%
+if errorlevel 1 call :boot2 interfaces
+@popd
+REM FIXME: @nmake /s /x interfaces_%FB_TARGET_PLATFORM%.log /f gen_helper.nmake updateCloopInterfaces
+@nmake /s /f gen_helper.nmake updateCloopInterfaces
 if errorlevel 1 call :boot2 interfaces
 goto :EOF
 
