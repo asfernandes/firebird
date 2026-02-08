@@ -346,14 +346,16 @@ jobs:
           call build.bat
 
       - name: Save docker image to cache
-        if: steps.restore-docker-image.outputs.cache-hit != 'true'
+        # No need to save the image in both platforms
+        if: ${{ matrix.platform == 'x86' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
         shell: cmd
         run: |
           if not exist builds\docker\windows\.docker-cache mkdir builds\docker\windows\.docker-cache
           docker save firebirdsql/firebird-builder-windows:fb6-x86-x64-windows-v1 -o builds\docker\windows\.docker-cache\firebird-builder-windows.tar
 
       - name: Save docker image cache
-        if: steps.restore-docker-image.outputs.cache-hit != 'true'
+        # No need to save the image in both platforms
+        if: ${{ matrix.platform == 'x86' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar
