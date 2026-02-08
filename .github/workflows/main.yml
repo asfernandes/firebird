@@ -324,6 +324,7 @@ jobs:
         id: dockerhub-login
         uses: docker/login-action@v3
         continue-on-error: true
+        if: ${{ steps.restore-docker-image.outputs.cache-hit != 'true' }}
         with:
           username: firebirdsql
           password: ${{ secrets.DOCKERHUB_TOKEN }}
