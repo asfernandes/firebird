@@ -190,6 +190,7 @@ ARG ARG_CPUCOUNT
 RUN apt-get update && \
 	apt-get -y install \
 		cmake \
+		gosu \
 		curl \
 		libc6-amd64-cross \
 		libfile-copy-recursive-perl \
@@ -199,8 +200,6 @@ RUN apt-get update && \
 RUN ln -s /usr/x86_64-linux-gnu/lib64 /lib64 && \
 	groupadd -g $ARG_CTNG_GID ctng && \
 	useradd -d /home/ctng -m -g $ARG_CTNG_GID -u $ARG_CTNG_UID -s /bin/bash ctng
-
-USER ctng
 
 RUN mkdir /home/ctng/firebird-build && \
 	chown ctng:ctng /home/ctng/firebird-build && \
