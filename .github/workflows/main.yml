@@ -301,19 +301,10 @@ jobs:
         uses: ./.github/actions/get-release-notes
 
       - name: Reclaim disk space in the runner
-        # FIXME:
-        #if: ${{ vars.RUNNER_ENVIRONMENT == 'github-hosted' }}
+        if: ${{ runner.environment == 'github-hosted' }}
         shell: cmd
         run: |
-          echo RUNNER_ENVIRONMENT: %RUNNER_ENVIRONMENT%
-          dir C:\
-          dir D:\
-          rd C:\Android /s /q
-          dir C:\
-          dir D:\
           rd "C:\Program Files\Microsoft Visual Studio\2022" /s /q
-          dir C:\
-          dir D:\
 
       - name: Restore docker image cache
         uses: actions/cache/restore@v4
