@@ -309,14 +309,14 @@ jobs:
         uses: actions/cache/restore@v4
         id: restore-docker-image
         with:
-          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar.gz
+          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar
           key: docker-image-firebird-builder-windows-fb6-x86-x64-windows-v1
 
       - name: Load cached docker image
         if: steps.restore-docker-image.outputs.cache-hit == 'true'
         shell: cmd
         run: |
-          "C:\Program Files\7-Zip\7z.exe" x -so builds\docker\windows\.docker-cache\firebird-builder-windows.tar.gz | docker load
+          docker load -i builds\docker\windows\.docker-cache\firebird-builder-windows.tar
 
       # firebirdsql/firebird-builder-windows image is private
       - name: Login to Docker Hub
@@ -345,13 +345,13 @@ jobs:
         shell: cmd
         run: |
           if not exist builds\docker\windows\.docker-cache mkdir builds\docker\windows\.docker-cache
-          docker save firebirdsql/firebird-builder-windows:fb6-x86-x64-windows-v1 | "C:\Program Files\7-Zip\7z.exe" a -si -tgzip builds\docker\windows\.docker-cache\firebird-builder-windows.tar.gz
+          docker save firebirdsql/firebird-builder-windows:fb6-x86-x64-windows-v1 -o builds\docker\windows\.docker-cache\firebird-builder-windows.tar
 
       - name: Save docker image cache
         if: steps.restore-docker-image.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar.gz
+          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar
           key: ${{ steps.restore-docker-image.outputs.cache-primary-key }}
 
       - name: Build x86 for client package in x64
