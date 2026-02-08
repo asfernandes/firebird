@@ -300,6 +300,11 @@ jobs:
       - name: Get Release Notes
         uses: ./.github/actions/get-release-notes
 
+      - name: Reclaim disk space in the runner
+        shell: cmd
+        run: |
+          rd C:\Android /s /q
+
       - name: Restore docker image cache
         uses: actions/cache/restore@v4
         id: restore-docker-image
