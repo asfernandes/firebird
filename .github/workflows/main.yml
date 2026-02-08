@@ -315,18 +315,12 @@ jobs:
           dir C:\
           dir D:\
 
-      - name: Restore docker image cache
-        uses: actions/cache/restore@v4
-        id: restore-docker-image
+      - name: Cache Docker images
+        id: docker-cache
+        uses: ScribeMD/docker-cache@0.5.0
         with:
-          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar
-          key: docker-image-firebird-builder-windows-fb6-x86-x64-windows-v1
-
-      - name: Load cached docker image
-        if: steps.restore-docker-image.outputs.cache-hit == 'true'
-        shell: cmd
-        run: |
-          docker load -i builds\docker\windows\.docker-cache\firebird-builder-windows.tar
+          # FIXME: name
+          key: docker-image-firebird-builder-windows-fb6-x86-x64-windows-v1-docker-cache
 
       # firebirdsql/firebird-builder-windows image is private
       - name: Login to Docker Hub
@@ -339,32 +333,16 @@ jobs:
 
       - name: Docker pull firebirdsql/firebird-builder-windows
         shell: cmd
-        if: ${{ steps.dockerhub-login.outcome == 'success' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
+        if: ${{ steps.dockerhub-login.outcome == 'success' && steps.docker-cache.outputs.cache-hit != 'true' }}
         run: |
           docker pull firebirdsql/firebird-builder-windows:fb6-x86-x64-windows-v1
 
       - name: Build firebird-builder-windows image (fallback)
         shell: cmd
-        if: ${{ steps.dockerhub-login.outcome != 'success' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
+        if: ${{ steps.dockerhub-login.outcome != 'success' && steps.docker-cache.outputs.cache-hit != 'true' }}
         run: |
           cd builds\docker\windows
           call build.bat
-
-      - name: Save docker image to cache
-        # No need to save the image in both platforms
-        if: ${{ matrix.platform == 'x86' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
-        shell: cmd
-        run: |
-          if not exist builds\docker\windows\.docker-cache mkdir builds\docker\windows\.docker-cache
-          docker save firebirdsql/firebird-builder-windows:fb6-x86-x64-windows-v1 -o builds\docker\windows\.docker-cache\firebird-builder-windows.tar
-
-      - name: Save docker image cache
-        # No need to save the image in both platforms
-        if: ${{ matrix.platform == 'x86' && steps.restore-docker-image.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: builds/docker/windows/.docker-cache/firebird-builder-windows.tar
-          key: ${{ steps.restore-docker-image.outputs.cache-primary-key }}
 
       - name: Build x86 for client package in x64
         id: build-x86
