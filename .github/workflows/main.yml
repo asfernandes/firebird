@@ -301,9 +301,14 @@ jobs:
         uses: ./.github/actions/get-release-notes
 
       - name: Reclaim disk space in the runner
+        if: ${{ env.RUNNER_ENVIRONMENT == 'github-hosted' }}
         shell: cmd
         run: |
+          dir C:\
           rd C:\Android /s /q
+          dir C:\
+          rd "C:\Program Files\Microsoft Visual Studio\2022" /s /q
+          dir C:\
 
       - name: Restore docker image cache
         uses: actions/cache/restore@v4
