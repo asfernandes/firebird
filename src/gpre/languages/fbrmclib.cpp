@@ -43,7 +43,7 @@
 #ifdef _MSC_VER
 #include "autoconfig_msvc.h"
 #else
-#include "gen/autoconfig.h"
+#include "autoconfig.h"
 #endif
 #include "fb_types.h"
 #include "ibase.h"
