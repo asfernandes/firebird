@@ -13,7 +13,7 @@
 #ifndef __BINRELOC_C__
 #define __BINRELOC_C__
 
-#include "autoconfig.h"	// ASF: added, to not expect ENABLE_BINRELOC from command line
+#include "gen/autoconfig.h"	// ASF: added, to not expect ENABLE_BINRELOC from command line
 
 #ifdef ENABLE_BINRELOC
 	#include <sys/types.h>
