@@ -293,7 +293,7 @@ jobs:
         if: ${{ runner.environment == 'github-hosted' }}
         shell: cmd
         run: |
-          rd "C:\Program Files\Microsoft Visual Studio\2022" /s /q
+          rd "C:\Program Files\Microsoft Visual Studio\2026" /s /q
 
       - name: Checkout
         uses: actions/checkout@v4
